@@ -11,6 +11,7 @@ import {
   FORM_SNIPPET,
   STORAGE_SNIPPET,
   analyzeCookies,
+  analyzeCors,
   analyzeForms,
   analyzeHeaders,
   analyzeStorage,
@@ -24,7 +25,7 @@ Usage:
   web-probe <action> <url> [options]
 
 Actions:
-  visit       Navigate and report the response, redirects, traffic, and indicators
+  visit       Navigate and report the response, redirects, traffic, and findings
   requests    Navigate and dump every request and response
   headers     Assess the main document's security headers
   cookies     List cookies and assess their flags
@@ -32,6 +33,7 @@ Actions:
   storage     Dump localStorage and sessionStorage and flag secret-shaped keys
   fill        Fill form fields, optionally submit, and report what was sent
   reflect     Send an inert marker through a parameter and report where it lands
+  cors        Send a foreign Origin and report whether the service reflects it
   eval        Evaluate an expression in the page and print its value
   screenshot  Save a PNG of the page
   audit       Run visit, headers, cookies, forms, storage, and merge the findings
@@ -45,6 +47,7 @@ Options:
   --submit               Submit the form after filling (fill)
   --param NAME           Query parameter to carry the marker (reflect)
   --marker TEXT          Marker to send (reflect), default a generated one
+  --origin ORIGIN        Origin to send (cors), default https://cors-probe.invalid
   --expression JS        Expression to evaluate (eval)
   --out PATH             Output file (screenshot)
   --bodies               Include response bodies (requests, visit)
@@ -68,6 +71,7 @@ const VALUE_FLAGS = new Set([
   "--form",
   "--param",
   "--marker",
+  "--origin",
   "--expression",
   "--out",
   "--max-body",
@@ -380,6 +384,38 @@ const ACTIONS = {
         inPage?.inDom === true
           ? "The marker reached the DOM unchanged. Read the context for the encoding applied, then decide whether script can be injected there."
           : "The marker did not reach the DOM. Reflection may still occur on another route, parameter, or content type.",
+    };
+  },
+
+  async cors(session, url, options) {
+    // Navigate twice: once plainly, once carrying a foreign Origin, so a
+    // reflected value is distinguishable from a fixed one.
+    await session.navigate(url, { waitMs: options.waitMs });
+    const baseline = documentOf(session.requests(), url)?.responseHeaders ?? {};
+
+    const sentOrigin = options.origin ?? "https://cors-probe.invalid";
+    session.reset();
+    await session.setExtraHeaders({ Origin: sentOrigin });
+    await session.navigate(url, { waitMs: options.waitMs });
+    const probed = documentOf(session.requests(), url)?.responseHeaders ?? {};
+
+    const observation = {
+      sentOrigin,
+      allowOrigin: probed["access-control-allow-origin"],
+      allowCredentials: probed["access-control-allow-credentials"],
+      allowOriginVaries:
+        baseline["access-control-allow-origin"] !==
+        probed["access-control-allow-origin"],
+    };
+    return {
+      url,
+      withoutOrigin: {
+        allowOrigin: baseline["access-control-allow-origin"],
+        allowCredentials: baseline["access-control-allow-credentials"],
+      },
+      ...observation,
+      vary: probed.vary,
+      findings: sortFindings(analyzeCors(observation)),
     };
   },
 

@@ -37,31 +37,39 @@ export WEB_PROBE_CDP=http://127.0.0.1:9222
 node bin/web-probe.mjs audit http://localhost:3000/ --pretty
 ```
 
-| Action                            | Reports                                                              |
-| --------------------------------- | -------------------------------------------------------------------- |
-| `audit URL`                       | One navigation, merged indicators from all the checks below          |
-| `visit URL`                       | Status, final URL, redirect chain, console errors, traffic           |
-| `requests URL`                    | Every request and response, with headers and bodies                  |
-| `headers URL`                     | Security headers on the main document                                |
-| `cookies URL`                     | Cookies and their `Secure`, `HttpOnly`, `SameSite` flags             |
-| `forms URL`                       | Forms, fields, and how each submits                                  |
-| `storage URL`                     | `localStorage` and `sessionStorage`, with secret-shaped keys flagged |
-| `fill URL --field n=v [--submit]` | What the browser sent, including hidden fields                       |
-| `reflect URL --param q`           | Whether a parameter reaches the DOM unencoded, with context          |
-| `eval URL --expression JS`        | An expression's value in the page                                    |
-| `screenshot URL --out f.png`      | A PNG                                                                |
+| Action                            | Reports                                                               |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `audit URL`                       | One navigation, merged findings from all the checks below             |
+| `visit URL`                       | Status, final URL, redirect chain, console errors, traffic            |
+| `requests URL`                    | Every request and response, with headers and bodies                   |
+| `headers URL`                     | Security headers on the main document                                 |
+| `cookies URL`                     | Cookies and their `Secure`, `HttpOnly`, `SameSite` flags              |
+| `forms URL`                       | Forms, fields, and how each submits                                   |
+| `storage URL`                     | `localStorage` and `sessionStorage`, with secret-shaped keys flagged  |
+| `fill URL --field n=v [--submit]` | What the browser sent, including hidden fields                        |
+| `reflect URL --param q`           | Whether a parameter reaches the DOM unencoded, with context           |
+| `cors URL --origin ORIGIN`        | Whether the service reflects a foreign `Origin`, and with credentials |
+| `eval URL --expression JS`        | An expression's value in the page                                     |
+| `screenshot URL --out f.png`      | A PNG                                                                 |
 
 Reach authenticated pages with `--header 'Authorization: Bearer …'` or
 `--cookie session=…`. `web-probe --help` lists every option.
 
 ### What the output means
 
-`findings` are **indicators, not confirmed vulnerabilities**. A missing header
-is an observation about one response from one handler. `reflect` reporting
-`inDom: true` says a marker survived to the DOM, not that script can be
-injected there; read `context` for the encoding that was applied. The prompt in
-`prompts/web-assessment.md` tells the agent to tie each indicator back to the
-code and to drop the ones that do not apply.
+`findings` is the output of automated checks on one navigation, not a report.
+Some entries are settled by what was observed: credentials posted over HTTP, a
+session cookie without `HttpOnly`, a foreign `Origin` reflected with
+credentials. Those are vulnerabilities, and source access is not needed to say
+so. Others are a question: `reflect` reporting `inDom: true` means the input
+was reflected, and `context` shows the encoding applied, but whether script can
+be injected there takes a second step. `csrf-token-absent` may just mean the
+route relies on `SameSite`.
+
+`prompts/web-assessment.md` draws that line for the agent and covers blackbox,
+graybox, and whitebox audits. In the first two it tells the agent to report
+from runtime evidence and not to withhold a finding for want of code; where
+source exists, naming the handler is an addition, not a precondition.
 
 ## In a scan
 
@@ -95,13 +103,14 @@ belongs. Deep Scan workers run read-only and will not use the browser.
 WEB_PROBE_LIGHTPANDA=/path/to/lightpanda node test/run-tests.mjs
 ```
 
-Ten tests cover the analysis functions and the target guards and always run.
-Five more start `test/test-app.mjs`, a deliberately weak application, with a
+Eleven tests cover the analysis functions and the target guards and always run.
+Seven more start `test/test-app.mjs`, a deliberately weak application, with a
 real Lightpanda, and check that `audit` finds its missing CSP, plaintext
 transport, and `HttpOnly`-less session cookie; that `visit` records a 302
 chain; that `requests` captures an XHR's JSON body; that `fill --submit`
-reports the POST body including the page's hidden CSRF field; and that
-`reflect` sees an unescaped marker. Those five skip when Lightpanda is absent.
+reports the POST body including the page's hidden CSRF field; that `cors`
+separates a reflected `Origin` from a fixed one; and that `reflect` sees an
+unescaped marker. Those seven skip when Lightpanda is absent.
 
 Verified against Lightpanda 1.0.4 and 1.1.0-nightly.
 

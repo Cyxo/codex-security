@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   analyzeCookies,
+  analyzeCors,
   analyzeForms,
   analyzeHeaders,
   analyzeStorage,
@@ -133,8 +134,10 @@ await test("header analysis treats HTTP as high severity", () => {
   );
 });
 
-await test("CORS wildcard with credentials outranks a plain wildcard", () => {
-  const withCredentials = analyzeHeaders({
+await test("a wildcard origin with credentials is not treated as exploitable", () => {
+  // Browsers refuse to pair `*` with credentials, so the combination cannot be
+  // read cross-origin and must not be reported as high.
+  const findings = analyzeHeaders({
     url: "https://app.test/",
     headers: {
       "access-control-allow-origin": "*",
@@ -147,13 +150,49 @@ await test("CORS wildcard with credentials outranks a plain wildcard", () => {
     },
     status: 200,
   });
-  assert(
-    ids(withCredentials).has("cors-wildcard-with-credentials"),
-    "credentialed wildcard expected",
+  const wildcard = findings.find(
+    (item) => item.id === "cors-wildcard-with-credentials",
   );
+  assert(wildcard !== undefined, "the misconfiguration should still be noted");
+  assert(wildcard.severity === "low", `expected low, got ${wildcard.severity}`);
   assert(
-    !ids(withCredentials).has("cors-wildcard"),
+    !ids(findings).has("cors-wildcard"),
     "the weaker finding must not also fire",
+  );
+});
+
+await test("reflected origin with credentials is high, without them is low", () => {
+  const credentialed = analyzeCors({
+    sentOrigin: "https://evil.test",
+    allowOrigin: "https://evil.test",
+    allowCredentials: "true",
+    allowOriginVaries: true,
+  });
+  const high = credentialed.find(
+    (item) => item.id === "cors-origin-reflected-with-credentials",
+  );
+  assert(high !== undefined, "reflection with credentials expected");
+  assert(high.severity === "high", `expected high, got ${high.severity}`);
+
+  const anonymous = analyzeCors({
+    sentOrigin: "https://evil.test",
+    allowOrigin: "https://evil.test",
+    allowCredentials: undefined,
+    allowOriginVaries: true,
+  });
+  const low = anonymous.find((item) => item.id === "cors-origin-reflected");
+  assert(low !== undefined, "reflection without credentials expected");
+  assert(low.severity === "low", `expected low, got ${low.severity}`);
+
+  const fixed = analyzeCors({
+    sentOrigin: "https://evil.test",
+    allowOrigin: "https://trusted.example",
+    allowCredentials: "true",
+    allowOriginVaries: false,
+  });
+  assert(
+    !ids(fixed).has("cors-origin-reflected-with-credentials"),
+    "a fixed allow-origin is not reflection",
   );
 });
 
@@ -294,6 +333,8 @@ if (!(await lightpandaAvailable())) {
     "visit records the redirect chain",
     "requests captures an XHR body",
     "fill submits a form and captures the post data",
+    "cors detects a reflected origin with credentials",
+    "cors clears a route with a fixed allow-origin",
     "reflect reports an unescaped marker",
   ]) {
     skip(name, "lightpanda not available");
@@ -422,6 +463,44 @@ if (!(await lightpandaAvailable())) {
       assert(
         post.postData.includes("csrf=tok-123"),
         "the hidden csrf field should be submitted",
+      );
+    });
+
+    await test("cors detects a reflected origin with credentials", async () => {
+      const result = await probe([
+        "cors",
+        `${APP}/api/reflect`,
+        "--origin",
+        "https://evil.test",
+      ]);
+      assert(result.code === 0, `exit ${result.code}: ${result.stderr}`);
+      assert(
+        result.json.allowOrigin === "https://evil.test",
+        `expected the origin echoed, got ${result.json.allowOrigin}`,
+      );
+      assert(
+        ids(result.json.findings).has("cors-origin-reflected-with-credentials"),
+        `expected the high finding, got ${JSON.stringify(result.json.findings)}`,
+      );
+    });
+
+    await test("cors clears a route with a fixed allow-origin", async () => {
+      const result = await probe([
+        "cors",
+        `${APP}/api/fixed`,
+        "--origin",
+        "https://evil.test",
+      ]);
+      assert(result.code === 0, `exit ${result.code}: ${result.stderr}`);
+      assert(
+        !ids(result.json.findings).has(
+          "cors-origin-reflected-with-credentials",
+        ),
+        "a fixed allow-origin must not be reported as reflection",
+      );
+      assert(
+        result.json.allowOrigin === "https://trusted.example",
+        `unexpected allow-origin ${result.json.allowOrigin}`,
       );
     });
 

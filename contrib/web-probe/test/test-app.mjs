@@ -58,6 +58,30 @@ createServer((request, response) => {
       JSON.stringify({ user: "guest", admin: false }),
     );
   }
+  if (url.pathname === "/api/reflect") {
+    // The exploitable CORS shape: echo whatever Origin arrives, with
+    // credentials allowed.
+    return send(
+      200,
+      {
+        "content-type": "text/html",
+        "access-control-allow-origin": request.headers.origin ?? "*",
+        "access-control-allow-credentials": "true",
+        vary: "Origin",
+      },
+      page("<h1>reflected</h1>"),
+    );
+  }
+  if (url.pathname === "/api/fixed") {
+    return send(
+      200,
+      {
+        "content-type": "text/html",
+        "access-control-allow-origin": "https://trusted.example",
+      },
+      page("<h1>fixed</h1>"),
+    );
+  }
   if (url.pathname === "/search") {
     // Reflected without escaping.
     const q = url.searchParams.get("q") ?? "";

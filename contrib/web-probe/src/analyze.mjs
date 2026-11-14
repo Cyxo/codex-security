@@ -1,8 +1,10 @@
-// Turns captured traffic into indicators.
+// Turns captured traffic into findings.
 //
-// These are observations, not confirmed vulnerabilities. Each one names what
-// was seen so a reviewer, or Codex Security's validation step, can decide
-// whether it matters for the application.
+// Each finding names what was observed and how far that observation goes. Some
+// are settled by runtime evidence alone, such as credentials posted over HTTP;
+// others, such as a reflected marker or an absent CSRF field, mark a question
+// for the caller to close. Severities are chosen with that difference in mind,
+// so a reviewer reading only this output does not overstate a hardening gap.
 
 const SESSION_COOKIE = /sess|sid|auth|token|jwt|login|remember/i;
 const CSRF_FIELD = /csrf|xsrf|_token|authenticity|nonce|state/i;
@@ -151,9 +153,9 @@ export function analyzeHeaders(document) {
     findings.push(
       finding(
         "cors-wildcard-with-credentials",
-        "high",
-        "CORS allows any origin with credentials",
-        "A wildcard origin combined with credentialed requests exposes authenticated responses to any site.",
+        "low",
+        "CORS sends a wildcard origin alongside credentials",
+        "Browsers reject this pair, so a credentialed cross-origin read is blocked and the combination is not exploitable as it stands. It does show the service means to allow credentialed cross-origin access, so check whether another route reflects the request's Origin instead: run `web-probe cors`.",
       ),
     );
   } else if (allowOrigin === "*") {
@@ -162,7 +164,7 @@ export function analyzeHeaders(document) {
         "cors-wildcard",
         "informational",
         "CORS allows any origin",
-        "Confirm the response carries no data specific to the caller.",
+        "Without credentials this exposes only what an unauthenticated caller could fetch anyway. Confirm the response carries no data specific to the caller.",
         allowOrigin,
       ),
     );
@@ -420,6 +422,62 @@ export function analyzeTraffic(requests, { pageUrl }) {
         `${thirdParty.size} third-party host(s) contacted`,
         "Each one is code or data the application trusts at runtime.",
         [...thirdParty].join(", "),
+      ),
+    );
+  }
+  return findings;
+}
+
+/**
+ * Assess what a foreign Origin header got back. Reflection plus credentials is
+ * the exploitable shape: the browser then lets the attacker's page read an
+ * authenticated response. A wildcard is not, because browsers refuse to pair
+ * it with credentials.
+ */
+export function analyzeCors({
+  sentOrigin,
+  allowOrigin,
+  allowCredentials,
+  allowOriginVaries,
+}) {
+  const findings = [];
+  const credentials = allowCredentials === "true";
+  const reflected = allowOrigin === sentOrigin;
+
+  if (reflected && credentials) {
+    findings.push(
+      finding(
+        "cors-origin-reflected-with-credentials",
+        "high",
+        "The service reflects an arbitrary Origin and allows credentials",
+        "Any site a victim visits can read this response with the victim's session. Confirm the response body carries data worth reading.",
+        `Origin: ${sentOrigin} -> Access-Control-Allow-Origin: ${allowOrigin}, Access-Control-Allow-Credentials: true`,
+      ),
+    );
+  } else if (reflected) {
+    findings.push(
+      finding(
+        "cors-origin-reflected",
+        "low",
+        "The service reflects an arbitrary Origin without credentials",
+        "A cross-origin read is possible but unauthenticated, so it exposes only what any caller could fetch. It becomes high severity if credentials are ever allowed on this route.",
+        `Origin: ${sentOrigin} -> Access-Control-Allow-Origin: ${allowOrigin}`,
+      ),
+    );
+  }
+  if (
+    !reflected &&
+    allowOrigin !== undefined &&
+    allowOrigin !== "*" &&
+    !allowOriginVaries
+  ) {
+    findings.push(
+      finding(
+        "cors-allow-origin-static",
+        "informational",
+        `Access-Control-Allow-Origin is fixed at ${allowOrigin}`,
+        "The foreign origin was not echoed, so this route does not reflect. Check that the allowed origin is one you control.",
+        allowOrigin,
       ),
     );
   }
