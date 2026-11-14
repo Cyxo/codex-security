@@ -1,0 +1,31 @@
+# LiteLLM in Responses-to-Chat-Completions bridge mode, for the sidecar in
+# compose.openai-compatible.yaml. Every value comes from the environment, so
+# this file holds no credentials and needs no rewriting per endpoint.
+#
+# Keep it in step with litellmConfig() in ../src/bridge.mjs, which generates the
+# same configuration for a bridge started outside Docker.
+
+model_list:
+  - model_name: "*"
+    litellm_params:
+      # The `openai/chat_completions/` prefix forces the bridge. A plain
+      # `openai/` prefix posts to the backend's own /responses instead, and
+      # `openai_like/` is unmapped for the Responses route.
+      model: openai/chat_completions/*
+      api_base: os.environ/CS_COMPAT_TARGET_BASE_URL
+      api_key: os.environ/CS_COMPAT_TARGET_API_KEY
+      drop_params: true
+      # Codex sends these on every turn. `drop_params` alone keeps them,
+      # because LiteLLM has no capability record for a custom model, and a
+      # strict backend answers `Unrecognized request arguments`.
+      additional_drop_params:
+        - web_search_options
+        - prompt_cache_key
+        - client_metadata
+        - safety_identifier
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

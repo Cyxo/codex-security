@@ -147,6 +147,110 @@ Run `docker compose -f compose.runner.yaml run --rm codex-security --help` to
 see which commands your image supports. Your CI system controls stage order
 and retries.
 
+### Input directory and extra arguments
+
+Both Compose files bind a host directory to `/input` (default `./input`,
+selected by `CODEX_SECURITY_INPUT`) for scan targets, knowledge-base files, and
+prompt files. It is read-only, because a scan reads its target. A checkout the
+model must build or test belongs under `/output`, as described above.
+
+`scan` accepts a plain directory; it does not need to be a Git repository. That
+makes a prompt-directed review of a whole input folder one command:
+
+```bash
+mkdir -p input/workspace input/context
+docker compose -f compose.runner.yaml run --rm codex-security \
+  scan /input/workspace \
+  --scan-prompt-file /input/context/instructions.md \
+  --knowledge-base /input/context \
+  --output-dir /output/review --headless
+```
+
+Arguments after `run --rm codex-security` replace the file's `command` and are
+taken verbatim, so prefer that form. When the command is fixed, as under
+`docker compose up` or for the bulk scan in `compose.yaml`, set
+`CODEX_SECURITY_ARGS` instead and the entrypoint appends it:
+
+```bash
+CODEX_SECURITY_ARGS='--knowledge-base /input/context --headless' \
+  docker compose up
+```
+
+The entrypoint splits that variable on whitespace, because Compose cannot
+expand one variable into several arguments. Quoting is not supported, so an
+argument containing a space needs the `run` form. Appended arguments reach
+bulk-scan's own validation, so the variable can carry the repository CSV this
+image requires.
+
+### OpenAI-compatible inference endpoints
+
+Setting `CS_COMPAT_BASE_URL` makes the entrypoint run the wrapper in
+`/opt/codex-security-contrib/openai-compatible`, which probes the endpoint and
+appends its provider definition to the command. Unset, the entrypoint behaves
+as before.
+
+An endpoint serving only `/chat/completions` needs the LiteLLM sidecar in
+`compose.openai-compatible.yaml`, because the bundled Codex removed
+`wire_api = "chat"`. Add that file after the base one. The
+[wrapper guide](../contrib/openai-compatible/README.md) covers both endpoint
+kinds, the probe, and the limits.
+
+### Assessing a running web application
+
+`compose.lightpanda.yaml` adds a [Lightpanda](https://lightpanda.io) browser on
+the Compose network, and the image carries `web-probe` to drive it over CDP.
+Together they let a scan check how the deployed application behaves: response
+headers, cookie flags, the requests the client actually makes, what a form
+submits, and whether a parameter reaches the DOM unencoded.
+
+```bash
+mkdir -p input/context
+cp contrib/web-probe/prompts/web-assessment.md input/context/
+# Replace the scope list in that copy with the origins you may test.
+
+export WEB_PROBE_TARGETS=app.internal:3000
+docker compose -f compose.runner.yaml -f compose.lightpanda.yaml \
+  run --rm codex-security \
+  scan /input/workspace \
+  --scan-prompt-file /input/context/web-assessment.md \
+  --output-dir /output/review --headless
+```
+
+`WEB_PROBE_TARGETS` is required and becomes the probe's host allowlist, so the
+agent cannot navigate off the targets you named. The browser reaches the
+application, not the scanner, so name a Compose service, use
+`host.docker.internal` for the host, or give a public origin. The sidecar runs
+with `--block-private-networks`; drop that flag when the target is itself a
+private address, and exempt only its range with `--block-cidrs`.
+
+Test only applications you are authorized to test. The
+[probe guide](../contrib/web-probe/README.md) covers every action, what the
+indicators mean, and which CDP methods Lightpanda implements.
+
+### X11 pass-through
+
+`compose.yaml` and `compose.runner.yaml` bind the host's `/tmp/.X11-unix` into
+the container read-only and pass `DISPLAY` through, so a program in the
+container can reach a local X server. Read-only is enough: a read-only mount
+denies writes to regular files, directories, and symlinks, not to sockets.
+
+Two consequences. The bind needs `/tmp/.X11-unix` to exist, so a headless host
+must point `CODEX_SECURITY_X11_SOCKET` at a directory that does:
+
+```bash
+CODEX_SECURITY_X11_SOCKET=/tmp docker compose -f compose.runner.yaml run --rm codex-security --help
+```
+
+And the X server rejects the container's uid 10001 until the display grants it,
+for example with `xhost +SI:localuser:#10001`, or `xhost +local:` for every
+local client. Both widen access to the whole X session, including input and
+window contents of unrelated programs, for a container that otherwise runs with
+dropped capabilities and a seccomp profile.
+
+An SSH-forwarded `DISPLAY` such as `localhost:10.0` reaches the host over TCP
+and ignores the socket. The image ships no X11 client libraries or GUI
+programs; add them to a derived image before the display is of any use.
+
 ### Sandbox and lifecycle
 
 The runner starts with a nonroot user, dropped capabilities,

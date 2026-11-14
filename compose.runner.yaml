@@ -15,7 +15,35 @@ services:
       GH_TOKEN:
       GITHUB_TOKEN:
       OPENAI_API_KEY:
+      # Extra CLI arguments appended to `command`, for `up` and for a `command`
+      # this file pins. Compose cannot expand one variable into several
+      # arguments, so the entrypoint splits this on whitespace. Quoting is not
+      # supported; `run --rm codex-security ARGS` takes arguments verbatim.
+      CODEX_SECURITY_ARGS:
+      # X11 pass-through. The socket below serves a local display such as `:0`;
+      # an SSH-forwarded `localhost:10.0` reaches the host over TCP instead and
+      # ignores it.
+      DISPLAY:
     volumes:
+      # Scan targets, knowledge-base files, and prompt files. Read-only: a scan
+      # reads its target. Put a checkout the model must build or test under
+      # /output instead.
+      - type: bind
+        source: ${CODEX_SECURITY_INPUT:-./input}
+        target: /input
+        read_only: true
+        bind:
+          create_host_path: false
+      # Read-only still permits connect(): a read-only mount denies writes to
+      # regular files, directories, and symlinks, not to sockets. Point
+      # CODEX_SECURITY_X11_SOCKET elsewhere on a host without an X server,
+      # which has no /tmp/.X11-unix to bind.
+      - type: bind
+        source: ${CODEX_SECURITY_X11_SOCKET:-/tmp/.X11-unix}
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: ${CODEX_SECURITY_RESULTS:-./results}
         target: /output

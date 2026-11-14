@@ -1,0 +1,62 @@
+# Runs scans against an OpenAI-compatible endpoint instead of the OpenAI API.
+#
+# Add this file after the base one. With a Responses-native endpoint, set only
+# CS_COMPAT_BASE_URL and CS_COMPAT_API_KEY on the scanner service; the bridge
+# below is for endpoints that serve just /chat/completions, which the bundled
+# Codex cannot use.
+#
+#   export CS_COMPAT_TARGET_BASE_URL=http://host.docker.internal:8000/v1
+#   export CS_COMPAT_TARGET_API_KEY=sk-local
+#   export LITELLM_MASTER_KEY="sk-$(openssl rand -hex 24)"
+#   docker compose -f compose.runner.yaml -f compose.openai-compatible.yaml \
+#     run --rm codex-security scan /input/repository --model my-model
+#
+# The scanner keeps cap_drop, seccomp, and no-new-privileges from the base
+# file. The sidecar is an ordinary service and shares none of that, so give it
+# only the endpoint it needs to reach.
+
+services:
+  litellm:
+    image: ${CODEX_SECURITY_LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}
+    init: true
+    restart: "no"
+    command:
+      - --config
+      - /config/litellm.yaml
+      - --port
+      - "4000"
+    environment:
+      CS_COMPAT_TARGET_BASE_URL: ${CS_COMPAT_TARGET_BASE_URL:?set it to the endpoint base URL, including /v1}
+      # An endpoint without authentication still needs a nonempty value.
+      CS_COMPAT_TARGET_API_KEY: ${CS_COMPAT_TARGET_API_KEY:-none}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set it to a random secret the scanner will present}
+    # Reaches an endpoint bound to the host's loopback as host.docker.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ./contrib/openai-compatible/docker/litellm-config.yaml
+        target: /config/litellm.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:4000/health/liveliness").read()
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  codex-security:
+    environment:
+      # The wrapper probes this URL, finds the Responses route LiteLLM serves,
+      # and uses it directly rather than starting a second bridge.
+      CS_COMPAT_BASE_URL: http://litellm:4000/v1
+      CS_COMPAT_API_KEY: ${LITELLM_MASTER_KEY:?set it to a random secret the scanner will present}
+    depends_on:
+      litellm:
+        condition: service_healthy
