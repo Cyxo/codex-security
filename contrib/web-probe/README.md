@@ -57,19 +57,32 @@ Reach authenticated pages with `--header 'Authorization: Bearer …'` or
 
 ### What the output means
 
-`findings` is the output of automated checks on one navigation, not a report.
-Some entries are settled by what was observed: credentials posted over HTTP, a
-session cookie without `HttpOnly`, a foreign `Origin` reflected with
-credentials. Those are vulnerabilities, and source access is not needed to say
-so. Others are a question: `reflect` reporting `inDom: true` means the input
-was reflected, and `context` shows the encoding applied, but whether script can
-be injected there takes a second step. `csrf-token-absent` may just mean the
-route relies on `SameSite`.
+`findings` **carries no severity, deliberately.** The checks see one response
+from one route, so they cannot know what the application is, who reaches it,
+what a session grants, or whether an injection sink exists. Those decide
+severity, so the caller sets it. Codex Security already grades findings against
+a rubric (`scan --rubric FILE`), and a second scale here would only anchor
+whoever read it first.
 
-`prompts/web-assessment.md` draws that line for the agent and covers blackbox,
-graybox, and whitebox audits. In the first two it tells the agent to report
-from runtime evidence and not to withhold a finding for want of code; where
-source exists, naming the handler is an addition, not a precondition.
+Each finding carries the inputs for that judgement:
+
+| Field         | Meaning                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------ |
+| `observed`    | The fact, as seen on the wire or in the DOM                                                      |
+| `basis`       | `direct` when the whole fact was observed, `heuristic` when part is inferred from a name pattern |
+| `establishes` | What the fact settles on its own, sometimes "Nothing on its own"                                 |
+| `assess`      | What the reader must determine before rating it                                                  |
+
+So `cookie-not-httponly` reports that the attribute is absent and that script
+on the origin can read the value, then asks what the cookie carries and whether
+a sink exists. The session-like name match is named as a guess rather than
+folded into a rating. `cors-wildcard-with-credentials` says outright that it
+establishes nothing, because browsers refuse that pair.
+
+`prompts/web-assessment.md` tells the agent to rate what it reports, and covers
+blackbox, graybox, and whitebox audits. In the first two it says not to withhold
+a finding for want of code; where source exists, naming the handler is an
+addition, not a precondition.
 
 ## In a scan
 

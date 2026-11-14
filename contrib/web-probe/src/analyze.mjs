@@ -1,22 +1,39 @@
 // Turns captured traffic into findings.
 //
-// Each finding names what was observed and how far that observation goes. Some
-// are settled by runtime evidence alone, such as credentials posted over HTTP;
-// others, such as a reflected marker or an absent CSRF field, mark a question
-// for the caller to close. Severities are chosen with that difference in mind,
-// so a reviewer reading only this output does not overstate a hardening gap.
+// Deliberately no severity. This module sees one response from one route: it
+// cannot know what the application is, who reaches it, what a session grants,
+// or whether an injection sink exists, and those decide severity. A number
+// here would only anchor whoever reads it. Codex Security already grades
+// findings against a rubric (`scan --rubric`), so the caller rates them.
+//
+// Each finding carries instead:
+//   observed     the fact, as seen on the wire or in the DOM
+//   basis        "direct" when the whole fact was observed, "heuristic" when
+//                part of it is inferred from a name pattern
+//   establishes  what the fact settles on its own
+//   assess       what the reader must determine before rating it
 
 const SESSION_COOKIE = /sess|sid|auth|token|jwt|login|remember/i;
 const CSRF_FIELD = /csrf|xsrf|_token|authenticity|nonce|state/i;
 const SECRET_KEY =
   /token|secret|key|password|passwd|jwt|bearer|credential|session/i;
 
-function finding(id, severity, title, detail, evidence) {
+function finding({
+  id,
+  title,
+  observed,
+  basis,
+  establishes,
+  assess,
+  evidence,
+}) {
   return {
     id,
-    severity,
     title,
-    detail,
+    observed,
+    basis,
+    establishes,
+    assess,
     ...(evidence === undefined ? {} : { evidence }),
   };
 }
@@ -31,12 +48,17 @@ export function analyzeHeaders(document) {
   const csp = get("content-security-policy");
   if (csp === undefined) {
     findings.push(
-      finding(
-        "csp-missing",
-        "medium",
-        "No Content-Security-Policy",
-        "The document sets no CSP, so injected script is not constrained by policy.",
-      ),
+      finding({
+        id: "csp-missing",
+        title: "No Content-Security-Policy",
+        observed:
+          "The document response carries no Content-Security-Policy header.",
+        basis: "direct",
+        establishes:
+          "No policy constrains where script on this document may come from.",
+        assess:
+          "Whether any route renders untrusted input into this origin, and what a successful injection would reach. Without a sink this is a hardening gap; with one it decides whether the injection runs.",
+      }),
     );
   } else {
     const unsafe = ["'unsafe-inline'", "'unsafe-eval'"].filter((token) =>
@@ -44,33 +66,38 @@ export function analyzeHeaders(document) {
     );
     if (unsafe.length > 0) {
       findings.push(
-        finding(
-          "csp-unsafe-directives",
-          "low",
-          `CSP allows ${unsafe.join(" and ")}`,
-          "These tokens remove most of the protection a CSP gives against injected script.",
-          csp,
-        ),
+        finding({
+          id: "csp-unsafe-directives",
+          title: `CSP allows ${unsafe.join(" and ")}`,
+          observed: `The policy contains ${unsafe.join(" and ")}.`,
+          basis: "direct",
+          establishes:
+            "The policy does not stop injected inline script or eval.",
+          assess:
+            "Whether an injection sink exists on this origin, and what the policy still blocks.",
+          evidence: csp,
+        }),
       );
     }
     if (/(?:default|script)-src[^;]*\*/.test(csp)) {
       findings.push(
-        finding(
-          "csp-wildcard-source",
-          "low",
-          "CSP uses a wildcard script source",
-          "A wildcard source lets any host serve script.",
-          csp,
-        ),
+        finding({
+          id: "csp-wildcard-source",
+          title: "CSP uses a wildcard script source",
+          observed:
+            "A default-src or script-src directive includes a wildcard.",
+          basis: "direct",
+          establishes: "Any host may serve script to this document.",
+          assess:
+            "Whether an attacker can get script onto a host the wildcard covers.",
+          evidence: csp,
+        }),
       );
     }
     if (!/frame-ancestors/.test(csp) && get("x-frame-options") === undefined) {
       findings.push(
-        finding(
-          "framing-unrestricted",
-          "low",
-          "Neither frame-ancestors nor X-Frame-Options is set",
-          "The document can be framed by any origin, which enables clickjacking against its controls.",
+        framingFinding(
+          "The policy sets no frame-ancestors and there is no X-Frame-Options header.",
         ),
       );
     }
@@ -78,70 +105,87 @@ export function analyzeHeaders(document) {
 
   if (csp === undefined && get("x-frame-options") === undefined) {
     findings.push(
-      finding(
-        "framing-unrestricted",
-        "low",
-        "No X-Frame-Options and no CSP",
-        "The document can be framed by any origin, which enables clickjacking against its controls.",
+      framingFinding(
+        "The document response carries neither a CSP nor an X-Frame-Options header.",
       ),
     );
   }
 
   if (https && get("strict-transport-security") === undefined) {
     findings.push(
-      finding(
-        "hsts-missing",
-        "medium",
-        "No Strict-Transport-Security",
-        "An HTTPS response without HSTS leaves the first request downgradable.",
-      ),
+      finding({
+        id: "hsts-missing",
+        title: "No Strict-Transport-Security",
+        observed:
+          "An HTTPS response carries no Strict-Transport-Security header.",
+        basis: "direct",
+        establishes:
+          "A browser that has not pinned this origin may be talked into a plaintext first request.",
+        assess:
+          "Whether users reach the origin by typing it or following a plaintext link, and whether it is in the preload list.",
+      }),
     );
   } else if (https) {
     const maxAge = /max-age=(\d+)/.exec(get("strict-transport-security") ?? "");
     if (maxAge !== null && Number(maxAge[1]) < 15_552_000) {
       findings.push(
-        finding(
-          "hsts-short",
-          "low",
-          "HSTS max-age is below six months",
-          "A short max-age narrows the window the protection covers.",
-          get("strict-transport-security"),
-        ),
+        finding({
+          id: "hsts-short",
+          title: "HSTS max-age is below six months",
+          observed: `max-age is ${maxAge[1]} seconds.`,
+          basis: "direct",
+          establishes: "The pin expires sooner than the usual baseline.",
+          assess:
+            "Whether the shorter window is deliberate, such as during a rollout.",
+          evidence: get("strict-transport-security"),
+        }),
       );
     }
   }
 
   if (!https && document.url !== undefined) {
     findings.push(
-      finding(
-        "plaintext-transport",
-        "high",
-        "The document was served over HTTP",
-        "Credentials, cookies, and responses travel in cleartext.",
-        document.url,
-      ),
+      finding({
+        id: "plaintext-transport",
+        title: "The document was served over HTTP",
+        observed: `The document was fetched from ${document.url}.`,
+        basis: "direct",
+        establishes:
+          "Everything in this request and response is readable and alterable in transit.",
+        assess:
+          "Whether this is the deployment users reach, and what crosses it. A local development server is not a finding; a production login page is.",
+        evidence: document.url,
+      }),
     );
   }
 
   if (get("x-content-type-options") !== "nosniff") {
     findings.push(
-      finding(
-        "nosniff-missing",
-        "low",
-        "No X-Content-Type-Options: nosniff",
-        "Browsers may sniff a response's type and treat data as script.",
-      ),
+      finding({
+        id: "nosniff-missing",
+        title: "No X-Content-Type-Options: nosniff",
+        observed: "The document response does not set nosniff.",
+        basis: "direct",
+        establishes:
+          "A browser may sniff a response's type rather than trust the declared one.",
+        assess:
+          "Whether any route returns caller-controlled bytes with a type a browser could sniff into script.",
+      }),
     );
   }
 
   if (get("referrer-policy") === undefined) {
     findings.push(
-      finding(
-        "referrer-policy-missing",
-        "informational",
-        "No Referrer-Policy",
-        "Full URLs, including any identifiers in a path or query, may leak to third parties.",
-      ),
+      finding({
+        id: "referrer-policy-missing",
+        title: "No Referrer-Policy",
+        observed: "The document response sets no Referrer-Policy.",
+        basis: "direct",
+        establishes:
+          "The browser default decides how much of this URL reaches other origins.",
+        assess:
+          "Whether URLs on this origin carry identifiers or tokens in their path or query.",
+      }),
     );
   }
 
@@ -151,22 +195,32 @@ export function analyzeHeaders(document) {
     get("access-control-allow-credentials") === "true"
   ) {
     findings.push(
-      finding(
-        "cors-wildcard-with-credentials",
-        "low",
-        "CORS sends a wildcard origin alongside credentials",
-        "Browsers reject this pair, so a credentialed cross-origin read is blocked and the combination is not exploitable as it stands. It does show the service means to allow credentialed cross-origin access, so check whether another route reflects the request's Origin instead: run `web-probe cors`.",
-      ),
+      finding({
+        id: "cors-wildcard-with-credentials",
+        title: "CORS sends a wildcard origin alongside credentials",
+        observed:
+          "Access-Control-Allow-Origin is * and Access-Control-Allow-Credentials is true.",
+        basis: "direct",
+        establishes:
+          "Nothing on its own: browsers refuse that pair, so a credentialed cross-origin read of this response is blocked.",
+        assess:
+          "Whether another route reflects the request's Origin instead, which is the exploitable shape. Run `web-probe cors` against the routes returning per-caller data.",
+      }),
     );
   } else if (allowOrigin === "*") {
     findings.push(
-      finding(
-        "cors-wildcard",
-        "informational",
-        "CORS allows any origin",
-        "Without credentials this exposes only what an unauthenticated caller could fetch anyway. Confirm the response carries no data specific to the caller.",
-        allowOrigin,
-      ),
+      finding({
+        id: "cors-wildcard",
+        title: "CORS allows any origin",
+        observed:
+          "Access-Control-Allow-Origin is *, with no credentials allowed.",
+        basis: "direct",
+        establishes:
+          "Any origin may read this response, but only as an unauthenticated caller.",
+        assess:
+          "Whether the response carries anything an unauthenticated caller could not already fetch directly.",
+        evidence: allowOrigin,
+      }),
     );
   }
 
@@ -179,13 +233,17 @@ export function analyzeHeaders(document) {
     const value = get(name);
     if (value !== undefined) {
       findings.push(
-        finding(
-          "version-disclosure",
-          "informational",
-          `${name} discloses software`,
-          "A version string tells an attacker which advisories to try.",
-          `${name}: ${value}`,
-        ),
+        finding({
+          id: "version-disclosure",
+          title: `${name} discloses software`,
+          observed: `${name}: ${value}`,
+          basis: "direct",
+          establishes:
+            "The response names the software, and sometimes its version.",
+          assess:
+            "Whether the named version has advisories that apply to this deployment. Absent that, this is reconnaissance detail rather than a weakness.",
+          evidence: `${name}: ${value}`,
+        }),
       );
     }
   }
@@ -193,53 +251,85 @@ export function analyzeHeaders(document) {
   return findings;
 }
 
+function framingFinding(observed) {
+  return finding({
+    id: "framing-unrestricted",
+    title: "Framing is unrestricted",
+    observed,
+    basis: "direct",
+    establishes: "Any origin may embed this document in a frame.",
+    assess:
+      "Whether the page carries a control whose single click changes state, which is what makes framing worth abusing.",
+  });
+}
+
 /** @param {{name: string, secure: boolean, httpOnly: boolean, sameSite: string|undefined}[]} cookies */
 export function analyzeCookies(cookies, { https }) {
   const findings = [];
   for (const cookie of cookies) {
+    // The missing attribute is observed. Whether the cookie carries a session
+    // is inferred from its name, so that part stays in `assess`.
     const sessionLike = SESSION_COOKIE.test(cookie.name);
+    const whatItCarries = sessionLike
+      ? "What the cookie carries: its name matches a session-like pattern, which is a guess, not an observation."
+      : "What the cookie carries.";
+
     if (https && cookie.secure !== true) {
       findings.push(
-        finding(
-          "cookie-not-secure",
-          sessionLike ? "high" : "medium",
-          `Cookie ${cookie.name} lacks Secure`,
-          "The cookie can be sent over a plaintext connection.",
-          cookie.name,
-        ),
+        finding({
+          id: "cookie-not-secure",
+          title: `Cookie ${cookie.name} lacks Secure`,
+          observed: "The cookie has no Secure attribute, on an HTTPS origin.",
+          basis: "direct",
+          establishes:
+            "The browser will send this cookie over a plaintext connection to the same host.",
+          assess: `${whatItCarries} Whether any plaintext request to this host is reachable.`,
+          evidence: cookie.name,
+        }),
       );
     }
-    if (sessionLike && cookie.httpOnly !== true) {
+    if (cookie.httpOnly !== true) {
       findings.push(
-        finding(
-          "cookie-not-httponly",
-          "high",
-          `Session cookie ${cookie.name} lacks HttpOnly`,
-          "Injected script can read the cookie and take over the session.",
-          cookie.name,
-        ),
+        finding({
+          id: "cookie-not-httponly",
+          title: `Cookie ${cookie.name} is readable by script`,
+          observed: "The cookie has no HttpOnly attribute.",
+          basis: "direct",
+          establishes:
+            "Any script running on this origin can read the cookie's value.",
+          assess: `${whatItCarries} Whether an injection sink exists on this origin, since that is what turns a readable cookie into a takeover.`,
+          evidence: cookie.name,
+        }),
       );
     }
     if (cookie.sameSite === undefined || cookie.sameSite === "None") {
       findings.push(
-        finding(
-          "cookie-samesite",
-          sessionLike ? "medium" : "low",
-          `Cookie ${cookie.name} has ${cookie.sameSite === undefined ? "no SameSite" : "SameSite=None"}`,
-          "The cookie rides on cross-site requests, which is the precondition for CSRF.",
-          cookie.name,
-        ),
+        finding({
+          id: "cookie-samesite",
+          title: `Cookie ${cookie.name} has ${cookie.sameSite === undefined ? "no SameSite" : "SameSite=None"}`,
+          observed:
+            cookie.sameSite === undefined
+              ? "The cookie sets no SameSite attribute, so the browser default applies."
+              : "The cookie sets SameSite=None.",
+          basis: "direct",
+          establishes:
+            "The cookie may accompany requests the user did not initiate from this site.",
+          assess: `${whatItCarries} Whether any state-changing route relies on this cookie alone, which is what a cross-site request would exploit.`,
+          evidence: cookie.name,
+        }),
       );
     }
     if (cookie.domain?.startsWith(".") === true) {
       findings.push(
-        finding(
-          "cookie-broad-domain",
-          "low",
-          `Cookie ${cookie.name} is scoped to ${cookie.domain}`,
-          "Every subdomain receives the cookie, including any that is less trusted.",
-          cookie.domain,
-        ),
+        finding({
+          id: "cookie-broad-domain",
+          title: `Cookie ${cookie.name} is scoped to ${cookie.domain}`,
+          observed: `The cookie's Domain attribute is ${cookie.domain}.`,
+          basis: "direct",
+          establishes: "Every subdomain of that domain receives the cookie.",
+          assess: `${whatItCarries} Whether any subdomain is less trusted or can be taken over.`,
+          evidence: cookie.domain,
+        }),
       );
     }
   }
@@ -268,45 +358,60 @@ export const FORM_SNIPPET = `(() => {
   return forms;
 })()`;
 
-export function analyzeForms(forms, { https, pageUrl }) {
+export function analyzeForms(forms, { https }) {
   const findings = [];
   for (const form of forms) {
     const label = form.id ?? form.name ?? `form[${form.index}]`;
     const fields = form.fields ?? [];
+    const names = fields
+      .map((field) => field.name)
+      .filter(Boolean)
+      .join(", ");
     const hasPassword = fields.some((field) => field.type === "password");
     const actionHttps = form.action?.startsWith("https://") === true;
 
     if (hasPassword && form.method === "GET") {
       findings.push(
-        finding(
-          "password-in-query",
-          "high",
-          `${label} submits a password with GET`,
-          "The password lands in the URL, so it reaches logs, history, and referrers.",
-          form.action,
-        ),
+        finding({
+          id: "password-in-query",
+          title: `${label} submits a password with GET`,
+          observed: `The form has method GET and a password field, submitting to ${form.action}.`,
+          basis: "direct",
+          establishes:
+            "The password is placed in the URL, so it reaches server logs, browser history, and referrers.",
+          assess:
+            "Whether the form is reachable and functional, rather than dead markup.",
+          evidence: form.action,
+        }),
       );
     }
     if (hasPassword && !actionHttps && form.action !== null) {
       findings.push(
-        finding(
-          "credentials-over-http",
-          "high",
-          `${label} posts credentials to a non-HTTPS action`,
-          "Credentials travel in cleartext.",
-          form.action,
-        ),
+        finding({
+          id: "credentials-over-http",
+          title: `${label} posts credentials to a non-HTTPS action`,
+          observed: `The form has a password field and submits to ${form.action}.`,
+          basis: "direct",
+          establishes:
+            "The credential travels in cleartext and is readable and alterable in transit.",
+          assess:
+            "Whether this is the deployment users reach. A development server on loopback is not the same as a production login.",
+          evidence: form.action,
+        }),
       );
     }
     if (https && form.action !== null && !actionHttps) {
       findings.push(
-        finding(
-          "mixed-form-action",
-          "medium",
-          `${label} on an HTTPS page submits to ${form.action}`,
-          "The submission leaves the secure origin.",
-          form.action,
-        ),
+        finding({
+          id: "mixed-form-action",
+          title: `${label} on an HTTPS page submits to ${form.action}`,
+          observed: `The page is HTTPS and the form action is ${form.action}.`,
+          basis: "direct",
+          establishes: "The submission leaves the secure origin.",
+          assess:
+            "What the form submits, and whether a browser would block or warn on it.",
+          evidence: form.action,
+        }),
       );
     }
     if (
@@ -314,16 +419,17 @@ export function analyzeForms(forms, { https, pageUrl }) {
       !fields.some((field) => CSRF_FIELD.test(field.name ?? ""))
     ) {
       findings.push(
-        finding(
-          "csrf-token-absent",
-          "medium",
-          `${label} posts without a token-shaped field`,
-          "No field name matches the usual CSRF token names. The application may rely on SameSite cookies or a header instead; confirm which.",
-          fields
-            .map((field) => field.name)
-            .filter(Boolean)
-            .join(", "),
-        ),
+        finding({
+          id: "csrf-token-absent",
+          title: `${label} posts without a token-shaped field`,
+          observed: `No field name matches the usual token names. Fields: ${names || "none"}.`,
+          basis: "heuristic",
+          establishes:
+            "Nothing on its own. A token may travel in a header, or the route may rely on SameSite cookies.",
+          assess:
+            "Resubmit without the token and cross-site, and see whether the route accepts it. That result, not this absence, is the finding.",
+          evidence: names,
+        }),
       );
     }
     for (const field of fields) {
@@ -333,13 +439,16 @@ export function analyzeForms(forms, { https, pageUrl }) {
         field.autocomplete !== "off"
       ) {
         findings.push(
-          finding(
-            "password-autocomplete",
-            "informational",
-            `${label} password field allows autocomplete`,
-            "Shared-device browsers may store the value.",
-            field.name ?? "(unnamed)",
-          ),
+          finding({
+            id: "password-autocomplete",
+            title: `${label} password field allows autocomplete`,
+            observed: `The password field ${field.name ?? "(unnamed)"} sets autocomplete=${field.autocomplete ?? "(unset)"}.`,
+            basis: "direct",
+            establishes: "A browser may offer to store and refill the value.",
+            assess:
+              "Whether shared devices are in this application's threat model. Current guidance often prefers password managers, so this may be intended.",
+            evidence: field.name ?? "(unnamed)",
+          }),
         );
       }
     }
@@ -365,13 +474,17 @@ export function analyzeStorage(storage) {
     for (const [key, value] of Object.entries(entries ?? {})) {
       if (SECRET_KEY.test(key)) {
         findings.push(
-          finding(
-            "secret-in-web-storage",
-            "medium",
-            `${area} holds a key named ${key}`,
-            "Web storage is readable by any script on the origin, so an injection reads it. Confirm whether the value is a credential.",
-            `${key} = ${String(value).slice(0, 40)}${String(value).length > 40 ? "…" : ""}`,
-          ),
+          finding({
+            id: "secret-in-web-storage",
+            title: `${area} holds a key named ${key}`,
+            observed: `${area}.${key} is set.`,
+            basis: "heuristic",
+            establishes:
+              "Web storage is readable by any script on the origin, so an injection reads this value.",
+            assess:
+              "Whether the value is a credential and what it grants. The key name matched a secret-like pattern, which is a guess; read the value.",
+            evidence: `${key} = ${String(value).slice(0, 40)}${String(value).length > 40 ? "…" : ""}`,
+          }),
         );
       }
     }
@@ -390,39 +503,50 @@ export function analyzeTraffic(requests, { pageUrl }) {
     if (parsed === null) continue;
     if (https && parsed.protocol === "http:") {
       findings.push(
-        finding(
-          "mixed-content",
-          "medium",
-          `Plaintext subresource ${parsed.host}`,
-          "An HTTPS page loaded this over HTTP, so it can be read and altered in transit.",
-          entry.url,
-        ),
+        finding({
+          id: "mixed-content",
+          title: `Plaintext subresource from ${parsed.host}`,
+          observed: `An HTTPS page loaded ${entry.url} over HTTP.`,
+          basis: "direct",
+          establishes: "That subresource is readable and alterable in transit.",
+          assess:
+            "What the resource is. An altered script runs in the page; an altered image does much less.",
+          evidence: entry.url,
+        }),
       );
     }
     if (pageHost !== undefined && parsed.host !== pageHost)
       thirdParty.add(parsed.host);
-    const auth = entry.requestHeaders?.authorization;
-    if (auth !== undefined && parsed.protocol === "http:") {
+    if (
+      entry.requestHeaders?.authorization !== undefined &&
+      parsed.protocol === "http:"
+    ) {
       findings.push(
-        finding(
-          "auth-header-over-http",
-          "high",
-          `Authorization header sent in cleartext to ${parsed.host}`,
-          "The credential is readable on the wire.",
-          entry.url,
-        ),
+        finding({
+          id: "auth-header-over-http",
+          title: `Authorization header sent in cleartext to ${parsed.host}`,
+          observed: `${entry.url} was requested over HTTP with an Authorization header.`,
+          basis: "direct",
+          establishes: "The credential is readable on the wire.",
+          assess:
+            "What the credential grants, and whether this path runs in production.",
+          evidence: entry.url,
+        }),
       );
     }
   }
   if (thirdParty.size > 0) {
     findings.push(
-      finding(
-        "third-party-hosts",
-        "informational",
-        `${thirdParty.size} third-party host(s) contacted`,
-        "Each one is code or data the application trusts at runtime.",
-        [...thirdParty].join(", "),
-      ),
+      finding({
+        id: "third-party-hosts",
+        title: `${thirdParty.size} third-party host(s) contacted`,
+        observed: `The page requested resources from ${[...thirdParty].join(", ")}.`,
+        basis: "direct",
+        establishes: "Each host is code or data this page trusts at runtime.",
+        assess:
+          "Which of them serve script, and whether each is intended. This is inventory, not a weakness by itself.",
+        evidence: [...thirdParty].join(", "),
+      }),
     );
   }
   return findings;
@@ -446,23 +570,32 @@ export function analyzeCors({
 
   if (reflected && credentials) {
     findings.push(
-      finding(
-        "cors-origin-reflected-with-credentials",
-        "high",
-        "The service reflects an arbitrary Origin and allows credentials",
-        "Any site a victim visits can read this response with the victim's session. Confirm the response body carries data worth reading.",
-        `Origin: ${sentOrigin} -> Access-Control-Allow-Origin: ${allowOrigin}, Access-Control-Allow-Credentials: true`,
-      ),
+      finding({
+        id: "cors-origin-reflected-with-credentials",
+        title:
+          "The service reflects an arbitrary Origin and allows credentials",
+        observed: `Origin: ${sentOrigin} came back as Access-Control-Allow-Origin: ${allowOrigin}, with Access-Control-Allow-Credentials: true.`,
+        basis: "direct",
+        establishes:
+          "A page on any origin can read this response using the visitor's credentials, and the browser will permit the read.",
+        assess:
+          "What the response body holds for a signed-in caller. Reflection on a response with nothing per-caller is a misconfiguration; on one holding account data it is a cross-origin read of that data.",
+        evidence: `Origin: ${sentOrigin} -> Access-Control-Allow-Origin: ${allowOrigin}`,
+      }),
     );
   } else if (reflected) {
     findings.push(
-      finding(
-        "cors-origin-reflected",
-        "low",
-        "The service reflects an arbitrary Origin without credentials",
-        "A cross-origin read is possible but unauthenticated, so it exposes only what any caller could fetch. It becomes high severity if credentials are ever allowed on this route.",
-        `Origin: ${sentOrigin} -> Access-Control-Allow-Origin: ${allowOrigin}`,
-      ),
+      finding({
+        id: "cors-origin-reflected",
+        title: "The service reflects an arbitrary Origin without credentials",
+        observed: `Origin: ${sentOrigin} came back as Access-Control-Allow-Origin: ${allowOrigin}, with no credentials allowed.`,
+        basis: "direct",
+        establishes:
+          "Any origin may read this response, but only as an unauthenticated caller.",
+        assess:
+          "Whether the response differs from a direct unauthenticated fetch, and whether credentials are allowed on any neighbouring route.",
+        evidence: `Origin: ${sentOrigin} -> Access-Control-Allow-Origin: ${allowOrigin}`,
+      }),
     );
   }
   if (
@@ -472,22 +605,29 @@ export function analyzeCors({
     !allowOriginVaries
   ) {
     findings.push(
-      finding(
-        "cors-allow-origin-static",
-        "informational",
-        `Access-Control-Allow-Origin is fixed at ${allowOrigin}`,
-        "The foreign origin was not echoed, so this route does not reflect. Check that the allowed origin is one you control.",
-        allowOrigin,
-      ),
+      finding({
+        id: "cors-allow-origin-static",
+        title: `Access-Control-Allow-Origin is fixed at ${allowOrigin}`,
+        observed: `The foreign origin was not echoed; the header stayed ${allowOrigin}.`,
+        basis: "direct",
+        establishes: "This route does not reflect the request's Origin.",
+        assess:
+          "Whether the allowed origin is one you control. This is context, not a weakness.",
+        evidence: allowOrigin,
+      }),
     );
   }
   return findings;
 }
 
-export const SEVERITY_ORDER = ["high", "medium", "low", "informational"];
-
+/**
+ * Directly observed findings first, then the ones resting on a name pattern,
+ * so a reader meets the solid facts before the guesses. Deliberately not a
+ * severity order: this module does not rate findings.
+ */
 export function sortFindings(findings) {
   const seen = new Set();
+  const order = { direct: 0, heuristic: 1 };
   return findings
     .filter((item) => {
       const key = `${item.id}|${item.evidence ?? ""}|${item.title}`;
@@ -496,8 +636,6 @@ export function sortFindings(findings) {
       return true;
     })
     .sort(
-      (left, right) =>
-        SEVERITY_ORDER.indexOf(left.severity) -
-        SEVERITY_ORDER.indexOf(right.severity),
+      (left, right) => (order[left.basis] ?? 2) - (order[right.basis] ?? 2),
     );
 }

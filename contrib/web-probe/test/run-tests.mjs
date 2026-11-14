@@ -120,23 +120,41 @@ await test("header analysis flags a missing CSP and a disclosed version", () => 
   assert(!found.has("plaintext-transport"), "an https URL is not plaintext");
 });
 
-await test("header analysis treats HTTP as high severity", () => {
-  const findings = analyzeHeaders({
-    url: "http://app.test/",
-    headers: {},
-    status: 200,
-  });
+await test("no finding carries a severity, and every one carries its basis", () => {
+  // Severity is the caller's call: this module sees one response and cannot
+  // know impact or exploitability. Guard that decision.
+  const findings = [
+    ...analyzeHeaders({ url: "http://app.test/", headers: {}, status: 200 }),
+    ...analyzeCookies([{ name: "session", secure: false, httpOnly: false }], {
+      https: true,
+    }),
+    ...analyzeStorage({ localStorage: { authToken: "x" }, sessionStorage: {} }),
+  ];
+  assert(findings.length > 0, "expected findings to check");
+  for (const item of findings) {
+    assert(!("severity" in item), `${item.id} must not carry a severity`);
+    assert(
+      item.basis === "direct" || item.basis === "heuristic",
+      `${item.id} has basis ${item.basis}`,
+    );
+    for (const field of ["observed", "establishes", "assess"]) {
+      assert(
+        typeof item[field] === "string" && item[field].length > 0,
+        `${item.id} is missing ${field}`,
+      );
+    }
+  }
   const plaintext = findings.find((item) => item.id === "plaintext-transport");
   assert(plaintext !== undefined, "plaintext-transport expected");
   assert(
-    plaintext.severity === "high",
-    `expected high, got ${plaintext.severity}`,
+    plaintext.assess.includes("development server"),
+    "the HTTP finding should tell the reader a dev server is not a finding",
   );
 });
 
-await test("a wildcard origin with credentials is not treated as exploitable", () => {
-  // Browsers refuse to pair `*` with credentials, so the combination cannot be
-  // read cross-origin and must not be reported as high.
+await test("a wildcard origin with credentials establishes nothing on its own", () => {
+  // Browsers refuse to pair `*` with credentials, so it cannot be read
+  // cross-origin. The finding must say so rather than imply exposure.
   const findings = analyzeHeaders({
     url: "https://app.test/",
     headers: {
@@ -154,25 +172,35 @@ await test("a wildcard origin with credentials is not treated as exploitable", (
     (item) => item.id === "cors-wildcard-with-credentials",
   );
   assert(wildcard !== undefined, "the misconfiguration should still be noted");
-  assert(wildcard.severity === "low", `expected low, got ${wildcard.severity}`);
+  assert(
+    wildcard.establishes.startsWith("Nothing on its own"),
+    `unexpected claim: ${wildcard.establishes}`,
+  );
+  assert(
+    wildcard.assess.includes("web-probe cors"),
+    "it should point at the action that finds the exploitable shape",
+  );
   assert(
     !ids(findings).has("cors-wildcard"),
     "the weaker finding must not also fire",
   );
 });
 
-await test("reflected origin with credentials is high, without them is low", () => {
+await test("reflection is separated from a fixed allow-origin", () => {
   const credentialed = analyzeCors({
     sentOrigin: "https://evil.test",
     allowOrigin: "https://evil.test",
     allowCredentials: "true",
     allowOriginVaries: true,
   });
-  const high = credentialed.find(
+  const read = credentialed.find(
     (item) => item.id === "cors-origin-reflected-with-credentials",
   );
-  assert(high !== undefined, "reflection with credentials expected");
-  assert(high.severity === "high", `expected high, got ${high.severity}`);
+  assert(read !== undefined, "reflection with credentials expected");
+  assert(
+    read.establishes.includes("visitor's credentials"),
+    `unexpected claim: ${read.establishes}`,
+  );
 
   const anonymous = analyzeCors({
     sentOrigin: "https://evil.test",
@@ -180,9 +208,17 @@ await test("reflected origin with credentials is high, without them is low", () 
     allowCredentials: undefined,
     allowOriginVaries: true,
   });
-  const low = anonymous.find((item) => item.id === "cors-origin-reflected");
-  assert(low !== undefined, "reflection without credentials expected");
-  assert(low.severity === "low", `expected low, got ${low.severity}`);
+  const unauthenticated = anonymous.find(
+    (item) => item.id === "cors-origin-reflected",
+  );
+  assert(
+    unauthenticated !== undefined,
+    "reflection without credentials expected",
+  );
+  assert(
+    unauthenticated.establishes.includes("unauthenticated"),
+    `unexpected claim: ${unauthenticated.establishes}`,
+  );
 
   const fixed = analyzeCors({
     sentOrigin: "https://evil.test",
@@ -196,7 +232,7 @@ await test("reflected origin with credentials is high, without them is low", () 
   );
 });
 
-await test("cookie analysis separates session cookies from the rest", () => {
+await test("cookie analysis marks the session guess without hiding the fact", () => {
   const findings = analyzeCookies(
     [
       { name: "session", secure: false, httpOnly: false, sameSite: undefined },
@@ -205,21 +241,29 @@ await test("cookie analysis separates session cookies from the rest", () => {
     { https: true },
   );
   const session = findings.filter((item) => item.evidence === "session");
+  const readable = session.find((item) => item.id === "cookie-not-httponly");
+  assert(readable !== undefined, "the readable-cookie fact expected");
   assert(
-    session.some(
-      (item) => item.id === "cookie-not-httponly" && item.severity === "high",
-    ),
-    "session HttpOnly expected high",
+    readable.assess.includes("guess"),
+    "the session inference must be named as a guess",
   );
   assert(
     session.some((item) => item.id === "cookie-not-secure"),
     "session Secure expected",
   );
+  // The fact is reported for every cookie; only the session wording differs.
+  const theme = findings.filter((item) => item.evidence === "theme");
   assert(
-    !findings.some(
-      (item) => item.evidence === "theme" && item.id === "cookie-not-secure",
-    ),
+    theme.some((item) => item.id === "cookie-not-httponly"),
+    "a non-session cookie without HttpOnly is still a fact worth reporting",
+  );
+  assert(
+    !theme.some((item) => item.id === "cookie-not-secure"),
     "a Secure cookie must not be flagged",
+  );
+  assert(
+    !theme.some((item) => item.assess.includes("guess")),
+    "a cookie whose name does not match should not mention the guess",
   );
 });
 
@@ -292,14 +336,14 @@ await test("traffic analysis reports mixed content and third-party hosts", () =>
   assert(found.has("third-party-hosts"), "third-party-hosts expected");
 });
 
-await test("findings sort by severity and drop duplicates", () => {
+await test("findings put observed facts before inferences, and drop duplicates", () => {
   const sorted = sortFindings([
-    { id: "a", severity: "low", title: "x" },
-    { id: "b", severity: "high", title: "y" },
-    { id: "a", severity: "low", title: "x" },
+    { id: "a", basis: "heuristic", title: "x" },
+    { id: "b", basis: "direct", title: "y" },
+    { id: "a", basis: "heuristic", title: "x" },
   ]);
   assert(sorted.length === 2, `expected 2, got ${sorted.length}`);
-  assert(sorted[0].severity === "high", "high must come first");
+  assert(sorted[0].basis === "direct", "direct findings come first");
 });
 
 await test("an unsupported scheme is refused before the browser starts", async () => {

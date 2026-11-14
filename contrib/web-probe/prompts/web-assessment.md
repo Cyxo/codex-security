@@ -70,49 +70,53 @@ authenticated pages.
 ## Reporting
 
 The `findings` array in each result is the output of automated checks on one
-navigation. It is your starting point, not your report. Decide on each entry,
-then report what survives.
+navigation. **It carries no severity, by design.** The checks see one response
+from one route: they cannot know what the application is, who reaches it, what
+a session grants, or whether an injection sink exists, and those are what
+decide severity. You decide it.
 
-**Report a confirmed issue as a vulnerability**, with a severity, the request
-and response that demonstrate it, and the steps to reproduce. Do not hedge an
-established finding into an "indicator" or a "potential issue" because no
-source was read.
+Each entry gives you the inputs instead:
 
-### Settled by runtime evidence alone
+- `observed` — the fact, as seen on the wire or in the DOM.
+- `basis` — `direct` when the whole fact was observed, `heuristic` when part of
+  it is inferred from a name pattern. Treat a `heuristic` entry as a lead to
+  confirm, not a result.
+- `establishes` — what the fact settles on its own. Some entries say
+  "Nothing on its own"; those are not findings yet.
+- `assess` — what you must determine before rating it.
 
-Observing these is enough. Report them as vulnerabilities:
+**Rate every finding you report yourself**, from exploitability and impact in
+_this_ application. If the scan was given a rubric, grade against it. Work from
+what you can establish: who can reach the route, what the affected data or
+action is worth, what an attacker gains, and what preconditions are needed. Say
+which of those you verified and which you assumed.
 
-- Credentials submitted over HTTP, or an `Authorization` header sent in
-  cleartext.
-- An authenticated application served over HTTP.
-- A session cookie without `HttpOnly`, or without `Secure` on an HTTPS origin.
-  Severity reflects that these amplify an injection rather than being
-  exploitable alone; report them regardless.
-- A foreign `Origin` reflected with `Access-Control-Allow-Credentials: true`,
-  per `cors`, when the response carries data specific to the caller. Check the
-  body: reflection on a response with nothing worth reading is not the same
-  finding. A wildcard `Access-Control-Allow-Origin` paired with credentials is
-  **not** this: browsers refuse that pair, so it is a misconfiguration to note,
-  not an exploitable one.
-- A redirect whose destination comes from a request parameter and leaves the
-  application's origins, per the `redirects` chain.
-- A plaintext subresource on an HTTPS page.
+Report a confirmed issue as a vulnerability, with the request and response that
+demonstrate it and the steps to reproduce. Do not hedge an established finding
+into an "indicator" or a "potential issue" because no source was read.
 
-### Needs a second step before you call it a vulnerability
+### Where runtime evidence is usually enough
+
+Credentials or an `Authorization` header in cleartext; an authenticated
+application served over HTTP; a session cookie readable by script or sent over
+plaintext; a foreign `Origin` reflected with credentials on a response holding
+per-caller data; a redirect whose destination comes from a parameter and leaves
+your origins. For each, `assess` names the one thing still to check, usually
+what the credential or response is worth.
+
+### Where it is not
 
 - `reflect` reporting `inDom: true` shows the input is reflected. Read
   `context` for the encoding actually applied, then establish whether the
-  position permits script before calling it cross-site scripting. Reflected
-  but correctly encoded is not a vulnerability. If you cannot establish it,
-  report what you observed and say what remains unproven.
-- `csrf-token-absent` is a question, not an answer. The route may be protected
-  by `SameSite` cookies or a required header. Resubmit without the token, or
-  with the cookie but no token, and report the result.
-- Missing `Content-Security-Policy`, `X-Content-Type-Options`,
-  `Referrer-Policy`, or framing protection are hardening gaps. Report them as
-  such, at their own severity. Do not promote them into an injection finding.
-- A disclosed version is informational until you tie it to an advisory
-  affecting that version.
+  position permits script before calling it cross-site scripting. Reflected but
+  correctly encoded is not a vulnerability. If you cannot establish it, report
+  what you observed and say what remains unproven.
+- `csrf-token-absent` is a question. Resubmit without the token and cross-site,
+  and report that result.
+- A missing `Content-Security-Policy`, `X-Content-Type-Options`,
+  `Referrer-Policy`, or framing header is a hardening gap. Rate it as one. Do
+  not promote it into an injection finding.
+- A disclosed version needs an advisory that applies to it.
 
 ### Evidence to record
 
