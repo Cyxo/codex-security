@@ -17,6 +17,10 @@ services:
       GH_TOKEN:
       GITHUB_TOKEN:
       OPENAI_API_KEY:
+      # OpenAI-compatible endpoint, read by contrib/openai-compatible. Setting
+      # CS_COMPAT_BASE_URL makes the entrypoint route through that wrapper.
+      CS_COMPAT_BASE_URL:
+      CS_COMPAT_API_KEY:
       # Extra CLI arguments appended to `command`, for `up` and for the
       # bulk-scan command below. Compose cannot expand one variable into
       # several arguments, so the entrypoint splits this on whitespace. Quoting
