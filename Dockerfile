@@ -35,6 +35,13 @@ LABEL org.opencontainers.image.title="Codex Security" \
 COPY --chmod=0555 docker/entrypoint.sh /usr/local/bin/codex-security-entrypoint
 COPY --chmod=0555 docker/git-credential.sh /usr/local/bin/codex-security-git-credential
 
+# The entrypoint runs this wrapper when CS_COMPAT_BASE_URL names an
+# OpenAI-compatible endpoint. It has no dependencies beyond Node.
+COPY --chmod=0555 contrib/openai-compatible/bin/ /opt/codex-security-contrib/openai-compatible/bin/
+COPY --chmod=0555 contrib/openai-compatible/src/ /opt/codex-security-contrib/openai-compatible/src/
+
+ENV CS_COMPAT_WRAPPER=/opt/codex-security-contrib/openai-compatible/bin/cs-compat.mjs
+
 RUN groupadd --gid 10001 codex-security \
     && useradd --uid 10001 --gid 10001 --no-create-home codex-security \
     && mkdir -p /input /output /state \

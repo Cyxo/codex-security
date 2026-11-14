@@ -12,9 +12,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { detectEndpoint, needsBridge, normalizeBaseUrl } from "../src/detect.mjs";
+import {
+  detectEndpoint,
+  needsBridge,
+  normalizeBaseUrl,
+} from "../src/detect.mjs";
 import { litellmConfig } from "../src/bridge.mjs";
-import { renderBlock, stripBlock, writeProviderConfig } from "../src/codex-config.mjs";
+import {
+  renderBlock,
+  stripBlock,
+  writeProviderConfig,
+} from "../src/codex-config.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const CHAT_PORT = 18111;
@@ -29,7 +37,9 @@ async function test(name, body) {
     process.stdout.write(`ok   ${name}\n`);
   } catch (error) {
     failures += 1;
-    process.stdout.write(`FAIL ${name}\n     ${error.message.split("\n").join("\n     ")}\n`);
+    process.stdout.write(
+      `FAIL ${name}\n     ${error.message.split("\n").join("\n     ")}\n`,
+    );
   }
 }
 
@@ -43,7 +53,8 @@ function assert(condition, message) {
 }
 
 function assertEqual(actual, expected, message) {
-  if (actual !== expected) throw new Error(`${message}: expected ${expected}, got ${actual}`);
+  if (actual !== expected)
+    throw new Error(`${message}: expected ${expected}, got ${actual}`);
 }
 
 function startServer(script, env) {
@@ -65,10 +76,14 @@ function startServer(script, env) {
 }
 
 async function run(args, env = {}) {
-  const child = spawn(process.execPath, [join(here, "..", "bin", "cs-compat.mjs"), ...args], {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...env },
-  });
+  const child = spawn(
+    process.execPath,
+    [join(here, "..", "bin", "cs-compat.mjs"), ...args],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...env },
+    },
+  );
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => (stdout += chunk));
@@ -86,14 +101,23 @@ async function litellmAvailable() {
   });
 }
 
-const chat = await startServer("fake-chat-backend.mjs", { PORT: String(CHAT_PORT), STRICT: "1" });
-const responses = await startServer("fake-responses-backend.mjs", { PORT: String(RESPONSES_PORT) });
+const chat = await startServer("fake-chat-backend.mjs", {
+  PORT: String(CHAT_PORT),
+  STRICT: "1",
+});
+const responses = await startServer("fake-responses-backend.mjs", {
+  PORT: String(RESPONSES_PORT),
+});
 const chatUrl = `http://127.0.0.1:${CHAT_PORT}/v1`;
 const responsesUrl = `http://127.0.0.1:${RESPONSES_PORT}/v1`;
 
 try {
   await test("normalizeBaseUrl strips trailing slashes and rejects junk", () => {
-    assertEqual(normalizeBaseUrl("http://x/v1/"), "http://x/v1", "trailing slash");
+    assertEqual(
+      normalizeBaseUrl("http://x/v1/"),
+      "http://x/v1",
+      "trailing slash",
+    );
     let threw = false;
     try {
       normalizeBaseUrl("ftp://x/v1");
@@ -107,7 +131,10 @@ try {
     const detection = await detectEndpoint(chatUrl, "sk-test");
     assertEqual(detection.kind, "chat", "kind");
     assert(needsBridge(detection), "a chat-only endpoint needs the bridge");
-    assert(detection.models.includes("fake-chat-model"), "models should be listed");
+    assert(
+      detection.models.includes("fake-chat-model"),
+      "models should be listed",
+    );
   });
 
   await test("detects a responses-native endpoint", async () => {
@@ -122,9 +149,14 @@ try {
   });
 
   await test("--compat-detect exits 0 for a usable endpoint and 1 otherwise", async () => {
-    const usable = await run(["--compat-detect", "scan", "."], { CS_COMPAT_BASE_URL: chatUrl });
+    const usable = await run(["--compat-detect", "scan", "."], {
+      CS_COMPAT_BASE_URL: chatUrl,
+    });
     assertEqual(usable.code, 0, "chat endpoint exit code");
-    assert(usable.stdout.includes("=> chat"), `expected kind in output, got: ${usable.stdout}`);
+    assert(
+      usable.stdout.includes("=> chat"),
+      `expected kind in output, got: ${usable.stdout}`,
+    );
     const dead = await run(["--compat-detect", "scan", "."], {
       CS_COMPAT_BASE_URL: "http://127.0.0.1:1/v1",
     });
@@ -132,13 +164,17 @@ try {
   });
 
   await test("a responses endpoint is used directly, with no bridge", async () => {
-    const result = await run(["--compat-dry-run", "scan", ".", "--model", "m"], {
-      CS_COMPAT_BASE_URL: responsesUrl,
-      CS_COMPAT_API_KEY: "sk-test",
-    });
+    const result = await run(
+      ["--compat-dry-run", "scan", ".", "--model", "m"],
+      {
+        CS_COMPAT_BASE_URL: responsesUrl,
+        CS_COMPAT_API_KEY: "sk-test",
+      },
+    );
     assertEqual(result.code, 0, `exit code (stderr: ${result.stderr})`);
     assert(
-      result.stdout.includes("model_providers.compat.base_url") && result.stdout.includes(responsesUrl),
+      result.stdout.includes("model_providers.compat.base_url") &&
+        result.stdout.includes(responsesUrl),
       `should point at the endpoint itself, got: ${result.stdout}`,
     );
     assert(!result.stderr.includes("starting"), "no bridge should start");
@@ -150,28 +186,50 @@ try {
       CS_COMPAT_API_KEY: "sk-test",
     });
     assertEqual(result.code, 1, "exit code");
-    assert(result.stderr.includes("--compat-bridge=never"), `unexpected error: ${result.stderr}`);
+    assert(
+      result.stderr.includes("--compat-bridge=never"),
+      `unexpected error: ${result.stderr}`,
+    );
   });
 
   await test("commands without --codex do not receive overrides", async () => {
-    const result = await run(["--compat-dry-run", "info"], { CS_COMPAT_BASE_URL: responsesUrl });
+    const result = await run(["--compat-dry-run", "info"], {
+      CS_COMPAT_BASE_URL: responsesUrl,
+    });
     assertEqual(result.code, 0, `exit code (stderr: ${result.stderr})`);
-    assert(!result.stdout.includes("--codex"), `info must not get --codex: ${result.stdout}`);
+    assert(
+      !result.stdout.includes("--codex"),
+      `info must not get --codex: ${result.stdout}`,
+    );
   });
 
   await test("the managed config block round-trips and refuses a conflict", async () => {
     const home = await mkdtemp(join(tmpdir(), "cs-compat-test-"));
     try {
-      const block = renderBlock({ providerId: "compat", baseUrl: "http://x/v1", envKey: "K" });
-      assertEqual(stripBlock(`${block}model = "m"\n`), 'model = "m"\n', "stripBlock");
+      const block = renderBlock({
+        providerId: "compat",
+        baseUrl: "http://x/v1",
+        envKey: "K",
+      });
+      assertEqual(
+        stripBlock(`${block}model = "m"\n`),
+        'model = "m"\n',
+        "stripBlock",
+      );
 
-      await writeFile(join(home, "config.toml"), '[tui]\nnotifications = true\n');
+      await writeFile(
+        join(home, "config.toml"),
+        "[tui]\nnotifications = true\n",
+      );
       const path = await writeProviderConfig(
         { providerId: "compat", baseUrl: "http://x/v1", envKey: "K" },
         { CODEX_HOME: home },
       );
       const written = await readFile(path, "utf8");
-      assert(written.startsWith("# >>> cs-compat"), "the block must come first");
+      assert(
+        written.startsWith("# >>> cs-compat"),
+        "the block must come first",
+      );
       assert(written.includes("[tui]"), "existing settings must survive");
       assert(
         written.indexOf("model_provider") < written.indexOf("["),
@@ -184,8 +242,15 @@ try {
         { CODEX_HOME: home },
       );
       const rewritten = await readFile(path, "utf8");
-      assertEqual(rewritten.split("[model_providers.compat]").length - 1, 1, "provider table count");
-      assert(rewritten.includes("http://y/v1"), "the new base URL should be written");
+      assertEqual(
+        rewritten.split("[model_providers.compat]").length - 1,
+        1,
+        "provider table count",
+      );
+      assert(
+        rewritten.includes("http://y/v1"),
+        "the new base URL should be written",
+      );
 
       await writeFile(join(home, "config.toml"), 'model_provider = "mine"\n');
       let threw = false;
@@ -205,11 +270,146 @@ try {
 
   await test("the LiteLLM config forces the chat bridge and drops Codex-only fields", () => {
     const config = litellmConfig(chatUrl);
-    assert(config.includes("model: openai/chat_completions/*"), "bridge prefix missing");
-    assert(config.includes("- web_search_options"), "web_search_options must be dropped");
-    assert(config.includes("- prompt_cache_key"), "prompt_cache_key must be dropped");
-    assert(!config.includes("sk-"), "no literal key belongs in the config file");
+    assert(
+      config.includes("model: openai/chat_completions/*"),
+      "bridge prefix missing",
+    );
+    assert(
+      config.includes("- web_search_options"),
+      "web_search_options must be dropped",
+    );
+    assert(
+      config.includes("- prompt_cache_key"),
+      "prompt_cache_key must be dropped",
+    );
+    assert(
+      !config.includes("sk-"),
+      "no literal key belongs in the config file",
+    );
   });
+
+  await test("the sidecar config and the generated one drop the same fields", async () => {
+    const sidecar = await readFile(
+      join(here, "..", "docker", "litellm-config.yaml"),
+      "utf8",
+    );
+    const generated = litellmConfig(chatUrl);
+    assert(
+      sidecar.includes("model: openai/chat_completions/*"),
+      "sidecar bridge prefix missing",
+    );
+    for (const field of [
+      "web_search_options",
+      "prompt_cache_key",
+      "client_metadata",
+      "safety_identifier",
+    ]) {
+      assert(
+        generated.includes(`- ${field}`),
+        `bridge.mjs should drop ${field}`,
+      );
+      assert(
+        sidecar.includes(`- ${field}`),
+        `the sidecar config should drop ${field}`,
+      );
+    }
+    assert(
+      !sidecar.includes("sk-"),
+      "no literal key belongs in the sidecar config",
+    );
+  });
+
+  if (process.platform === "win32") {
+    skip(
+      "the image entrypoint routes through the wrapper only when configured",
+      "needs a POSIX shell",
+    );
+  } else {
+    await test("the image entrypoint routes through the wrapper only when configured", async () => {
+      const stubHome = await mkdtemp(join(tmpdir(), "cs-compat-entry-"));
+      try {
+        const stub = join(stubHome, "codex-security");
+        await writeFile(
+          stub,
+          '#!/bin/sh\nprintf "ARGS:%s\\nKEY:%s\\n" "$*" "${CS_COMPAT_PROVIDER_KEY:-unset}"\n',
+          {
+            mode: 0o755,
+          },
+        );
+        const entrypoint = join(
+          here,
+          "..",
+          "..",
+          "..",
+          "docker",
+          "entrypoint.sh",
+        );
+        const wrapper = join(here, "..", "bin", "cs-compat.mjs");
+        const invoke = (env) =>
+          new Promise((resolve) => {
+            const child = spawn(
+              "sh",
+              [entrypoint, "scan", "/input/repository", "--model", "m"],
+              {
+                stdio: ["ignore", "pipe", "pipe"],
+                env: {
+                  ...process.env,
+                  PATH: `${stubHome}:${process.env.PATH}`,
+                  ...env,
+                },
+              },
+            );
+            let stdout = "";
+            let stderr = "";
+            child.stdout.on("data", (chunk) => (stdout += chunk));
+            child.stderr.on("data", (chunk) => (stderr += chunk));
+            child.on("exit", (code) => resolve({ code, stdout, stderr }));
+          });
+
+        const plain = await invoke({ CS_COMPAT_BASE_URL: "" });
+        assertEqual(plain.code, 0, `unconfigured exit (${plain.stderr})`);
+        assert(
+          !plain.stdout.includes("--codex"),
+          `unconfigured must not add overrides: ${plain.stdout}`,
+        );
+        assert(
+          plain.stdout.includes("KEY:unset"),
+          "unconfigured must not export a provider key",
+        );
+
+        const configured = await invoke({
+          CS_COMPAT_BASE_URL: responsesUrl,
+          CS_COMPAT_API_KEY: "sk-sidecar",
+          CS_COMPAT_WRAPPER: wrapper,
+        });
+        assertEqual(
+          configured.code,
+          0,
+          `configured exit (${configured.stderr})`,
+        );
+        assert(
+          configured.stdout.includes("--codex"),
+          `configured must add overrides: ${configured.stdout}`,
+        );
+        assert(
+          configured.stdout.includes(responsesUrl),
+          "the endpoint should reach the CLI",
+        );
+        assert(
+          configured.stdout.includes("KEY:sk-sidecar"),
+          "the key should reach the CLI by environment",
+        );
+
+        const missing = await invoke({
+          CS_COMPAT_BASE_URL: responsesUrl,
+          CS_COMPAT_WRAPPER: join(stubHome, "absent.mjs"),
+        });
+        assertEqual(missing.code, 2, "a missing wrapper should fail loudly");
+      } finally {
+        await rm(stubHome, { recursive: true, force: true });
+      }
+    });
+  }
 
   if (await litellmAvailable()) {
     await test("a real Codex request bridges to chat completions and streams back", async () => {
@@ -221,7 +421,10 @@ try {
       });
       try {
         const body = JSON.parse(
-          await readFile(join(here, "fixtures", "codex-responses-request.json"), "utf8"),
+          await readFile(
+            join(here, "fixtures", "codex-responses-request.json"),
+            "utf8",
+          ),
         );
         body.model = "fake-chat-model";
         const response = await fetch(`${bridge.baseUrl}/responses`, {
@@ -234,27 +437,42 @@ try {
           body: JSON.stringify(body),
         });
         const text = await response.text();
-        assertEqual(response.status, 200, `bridge status (${text.slice(0, 400)})`);
+        assertEqual(
+          response.status,
+          200,
+          `bridge status (${text.slice(0, 400)})`,
+        );
         for (const expected of [
           "response.created",
           "response.output_item.added",
           "response.function_call_arguments.done",
           "response.completed",
         ]) {
-          assert(text.includes(`"type":"${expected}"`), `missing SSE event ${expected}`);
+          assert(
+            text.includes(`"type":"${expected}"`),
+            `missing SSE event ${expected}`,
+          );
         }
-        assert(text.includes('"name":"exec_command"'), "the tool call should reach the client");
+        assert(
+          text.includes('"name":"exec_command"'),
+          "the tool call should reach the client",
+        );
       } finally {
         await bridge.stop();
       }
     });
   } else {
-    skip("a real Codex request bridges to chat completions and streams back", "litellm not installed");
+    skip(
+      "a real Codex request bridges to chat completions and streams back",
+      "litellm not installed",
+    );
   }
 } finally {
   chat.kill();
   responses.kill();
 }
 
-process.stdout.write(`\n${failures === 0 ? "PASS" : "FAIL"} (${failures} failed, ${skipped} skipped)\n`);
+process.stdout.write(
+  `\n${failures === 0 ? "PASS" : "FAIL"} (${failures} failed, ${skipped} skipped)\n`,
+);
 process.exitCode = failures === 0 ? 0 : 1;

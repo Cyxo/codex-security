@@ -66,31 +66,31 @@ Detection posts an empty JSON body to each route, so it consumes no tokens: a
 served route answers 400 or 422, an absent one answers 404 or 405. The result
 decides the path.
 
-| Endpoint serves | Wrapper does |
-| --- | --- |
-| `/responses` | Points Codex straight at the endpoint |
+| Endpoint serves          | Wrapper does                                                  |
+| ------------------------ | ------------------------------------------------------------- |
+| `/responses`             | Points Codex straight at the endpoint                         |
 | `/chat/completions` only | Starts LiteLLM on a free loopback port and points Codex at it |
-| both | Uses `/responses` directly |
-| neither | Fails, reporting each probe |
+| both                     | Uses `/responses` directly                                    |
+| neither                  | Fails, reporting each probe                                   |
 
 Every argument that is not prefixed `--compat-` goes to `codex-security`
 unchanged.
 
 ### Flags
 
-| Flag | Environment variable | Meaning |
-| --- | --- | --- |
-| `--compat-base-url URL` | `CS_COMPAT_BASE_URL` | Endpoint base URL, including `/v1` |
+| Flag                        | Environment variable    | Meaning                                                |
+| --------------------------- | ----------------------- | ------------------------------------------------------ |
+| `--compat-base-url URL`     | `CS_COMPAT_BASE_URL`    | Endpoint base URL, including `/v1`                     |
 | `--compat-api-key-env NAME` | `CS_COMPAT_API_KEY_ENV` | Variable holding the key (default `CS_COMPAT_API_KEY`) |
-| `--compat-bridge MODE` | `CS_COMPAT_BRIDGE` | `auto`, `never`, or `always` |
-| `--compat-bridge-impl NAME` | `CS_COMPAT_BRIDGE_IMPL` | `litellm` or `auto` |
-| `--compat-bridge-port N` | | Bridge port, default a free one |
-| `--compat-provider-id ID` | `CS_COMPAT_PROVIDER_ID` | Codex provider id, default `compat` |
-| `--compat-cli PATH` | `CS_COMPAT_CLI` | `codex-security` executable |
-| `--compat-write-config` | | Persist the provider into `$CODEX_HOME/config.toml` |
-| `--compat-detect` | | Probe, print, exit |
-| `--compat-dry-run` | | Print the `codex-security` invocation |
-| `--compat-verbose` | | Report each decision |
+| `--compat-bridge MODE`      | `CS_COMPAT_BRIDGE`      | `auto`, `never`, or `always`                           |
+| `--compat-bridge-impl NAME` | `CS_COMPAT_BRIDGE_IMPL` | `litellm` or `auto`                                    |
+| `--compat-bridge-port N`    |                         | Bridge port, default a free one                        |
+| `--compat-provider-id ID`   | `CS_COMPAT_PROVIDER_ID` | Codex provider id, default `compat`                    |
+| `--compat-cli PATH`         | `CS_COMPAT_CLI`         | `codex-security` executable                            |
+| `--compat-write-config`     |                         | Persist the provider into `$CODEX_HOME/config.toml`    |
+| `--compat-detect`           |                         | Probe, print, exit                                     |
+| `--compat-dry-run`          |                         | Print the `codex-security` invocation                  |
+| `--compat-verbose`          |                         | Report each decision                                   |
 
 The API key never appears on a command line. The wrapper exports it as
 `CS_COMPAT_PROVIDER_KEY` and declares that name as the provider's `env_key`.
@@ -114,6 +114,48 @@ top-level key to the table header above it. Rewriting replaces the block, and an
 existing top-level `model_provider` outside the block stops the write rather
 than producing invalid TOML. A bridge port changes between runs, so a persisted
 bridge URL goes stale.
+
+## In the container image
+
+The Dockerfile copies `bin/` and `src/` to
+`/opt/codex-security-contrib/openai-compatible`, and `docker/entrypoint.sh`
+runs the wrapper when `CS_COMPAT_BASE_URL` is set. Without that variable the
+entrypoint still execs `codex-security` directly, so existing images and
+Compose commands behave as before. The wrapper finds the CLI on `PATH` and
+needs nothing beyond Node, which the image already has.
+
+For a Responses-native endpoint, set two variables on the scanner service:
+
+```bash
+CS_COMPAT_BASE_URL=https://endpoint.example/v1 \
+CS_COMPAT_API_KEY=sk-... \
+docker compose -f compose.runner.yaml run --rm codex-security \
+  scan /input/repository --model my-model
+```
+
+For a Chat Completions endpoint, add `compose.openai-compatible.yaml`. It runs
+LiteLLM as a sidecar rather than inside the scanner, which keeps roughly a
+gigabyte of Python out of the image and leaves the scanner's `cap_drop`,
+seccomp, and `no-new-privileges` untouched:
+
+```bash
+export CS_COMPAT_TARGET_BASE_URL=http://host.docker.internal:8000/v1
+export CS_COMPAT_TARGET_API_KEY=sk-local
+export LITELLM_MASTER_KEY="sk-$(openssl rand -hex 24)"
+docker compose -f compose.runner.yaml -f compose.openai-compatible.yaml \
+  run --rm codex-security scan /input/repository --model my-model
+```
+
+The sidecar reads `docker/litellm-config.yaml` from this directory and takes
+every value from its environment, so no credential is written to a file. The
+scanner probes `http://litellm:4000/v1`, finds the Responses route, and uses it
+directly. `host.docker.internal` resolves through the `extra_hosts` entry on
+the sidecar; an endpoint in another Compose service is reachable by its service
+name instead.
+
+Starting the bridge inside the scanner container does not work: the image has
+no pip and no LiteLLM. `--compat-bridge auto` detects a Chat Completions
+endpoint, fails to start a bridge, and reports that. Use the sidecar.
 
 ## Verify
 

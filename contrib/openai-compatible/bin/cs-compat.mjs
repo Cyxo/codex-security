@@ -11,7 +11,11 @@
 
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { detectEndpoint, describeDetection, needsBridge } from "../src/detect.mjs";
+import {
+  detectEndpoint,
+  describeDetection,
+  needsBridge,
+} from "../src/detect.mjs";
 import { startBridge, BRIDGE_IMPLEMENTATIONS } from "../src/bridge.mjs";
 import { writeProviderConfig } from "../src/codex-config.mjs";
 
@@ -82,7 +86,10 @@ function parseArguments(argv) {
       continue;
     }
     const [name, inlineValue] = argument.includes("=")
-      ? [argument.slice(0, argument.indexOf("=")), argument.slice(argument.indexOf("=") + 1)]
+      ? [
+          argument.slice(0, argument.indexOf("=")),
+          argument.slice(argument.indexOf("=") + 1),
+        ]
       : [argument, undefined];
     if (Object.hasOwn(FLAGS, name)) {
       const value = inlineValue ?? argv[(index += 1)];
@@ -105,10 +112,9 @@ function resolveCli(explicit) {
   if (candidate) return candidate;
   const require = createRequire(import.meta.url);
   try {
-    return require.resolve("@openai/codex-security/package.json").replace(
-      /package\.json$/,
-      "bin/codex-security.mjs",
-    );
+    return require
+      .resolve("@openai/codex-security/package.json")
+      .replace(/package\.json$/, "bin/codex-security.mjs");
   } catch {
     return "codex-security";
   }
@@ -144,7 +150,9 @@ async function main() {
     );
   }
   const apiKeyEnv =
-    options.apiKeyEnv ?? process.env.CS_COMPAT_API_KEY_ENV ?? "CS_COMPAT_API_KEY";
+    options.apiKeyEnv ??
+    process.env.CS_COMPAT_API_KEY_ENV ??
+    "CS_COMPAT_API_KEY";
   const apiKey = process.env[apiKeyEnv] ?? "";
   if (apiKey === "") {
     log(`no key in ${apiKeyEnv}; probing without authentication`);
@@ -152,7 +160,9 @@ async function main() {
 
   const detection = await detectEndpoint(baseUrl, apiKey);
   if (options.detectOnly) {
-    process.stdout.write(`${describeDetection(detection)}\n=> ${detection.kind}\n`);
+    process.stdout.write(
+      `${describeDetection(detection)}\n=> ${detection.kind}\n`,
+    );
     return detection.kind === "none" ? 1 : 0;
   }
   log(`endpoint kind: ${detection.kind}`);
@@ -165,10 +175,13 @@ async function main() {
 
   const bridgeMode = options.bridge ?? process.env.CS_COMPAT_BRIDGE ?? "auto";
   if (!["auto", "never", "always"].includes(bridgeMode)) {
-    throw new Error(`--compat-bridge must be auto, never, or always (got ${bridgeMode}).`);
+    throw new Error(
+      `--compat-bridge must be auto, never, or always (got ${bridgeMode}).`,
+    );
   }
   const useBridge =
-    bridgeMode === "always" || (bridgeMode === "auto" && needsBridge(detection));
+    bridgeMode === "always" ||
+    (bridgeMode === "auto" && needsBridge(detection));
   if (!useBridge && detection.kind === "chat") {
     throw new Error(
       `${detection.baseUrl} serves only /chat/completions, which Codex 0.167 cannot use, ` +
@@ -176,14 +189,16 @@ async function main() {
     );
   }
 
-  const providerId = options.providerId ?? process.env.CS_COMPAT_PROVIDER_ID ?? "compat";
+  const providerId =
+    options.providerId ?? process.env.CS_COMPAT_PROVIDER_ID ?? "compat";
   const subcommand = subcommandOf(forwarded);
   let bridge;
   try {
     let providerBaseUrl = detection.baseUrl;
     if (useBridge) {
       bridge = await startBridge({
-        implementation: options.bridgeImpl ?? process.env.CS_COMPAT_BRIDGE_IMPL ?? "auto",
+        implementation:
+          options.bridgeImpl ?? process.env.CS_COMPAT_BRIDGE_IMPL ?? "auto",
         targetBaseUrl: detection.baseUrl,
         apiKey,
         port: options.bridgePort === undefined ? 0 : Number(options.bridgePort),
@@ -230,7 +245,9 @@ async function main() {
 }
 
 function quote(argument) {
-  return /[\s'"$]/.test(argument) ? `'${argument.replaceAll("'", "'\\''")}'` : argument;
+  return /[\s'"$]/.test(argument)
+    ? `'${argument.replaceAll("'", "'\\''")}'`
+    : argument;
 }
 
 function run(cli, args, env) {
@@ -259,6 +276,8 @@ function run(cli, args, env) {
 try {
   process.exitCode = await main();
 } catch (error) {
-  process.stderr.write(`cs-compat: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(
+    `cs-compat: ${error instanceof Error ? error.message : String(error)}\n`,
+  );
   process.exitCode = 1;
 }

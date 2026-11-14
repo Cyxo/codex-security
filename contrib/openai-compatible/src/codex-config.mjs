@@ -38,7 +38,10 @@ export function stripBlock(contents) {
   if (begin === -1) return contents;
   const end = contents.indexOf(END, begin);
   if (end === -1) return contents.slice(0, begin);
-  return contents.slice(0, begin) + contents.slice(end + END.length).replace(/^\r?\n/, "");
+  return (
+    contents.slice(0, begin) +
+    contents.slice(end + END.length).replace(/^\r?\n/, "")
+  );
 }
 
 /** A second top-level `model_provider` would make the file invalid TOML. */
@@ -67,8 +70,12 @@ export async function writeProviderConfig(
     );
   }
   await mkdir(home, { recursive: true, mode: 0o700 });
-  await writeFile(path, renderBlock({ providerId, baseUrl, envKey }) + remainder, {
-    mode: 0o600,
-  });
+  await writeFile(
+    path,
+    renderBlock({ providerId, baseUrl, envKey }) + remainder,
+    {
+      mode: 0o600,
+    },
+  );
   return path;
 }

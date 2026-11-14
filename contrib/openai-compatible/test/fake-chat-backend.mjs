@@ -44,23 +44,47 @@ function handle(request, response, body) {
 
   if (request.url.startsWith("/v1/models")) {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ object: "list", data: [{ id: MODEL, object: "model" }] }));
+    response.end(
+      JSON.stringify({
+        object: "list",
+        data: [{ id: MODEL, object: "model" }],
+      }),
+    );
     return;
   }
 
   // Anything other than chat completions is absent, like a real chat-only server.
   if (!request.url.startsWith("/v1/chat/completions")) {
     response.writeHead(404, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: { message: `Unknown path ${request.url}`, type: "not_found" } }));
+    response.end(
+      JSON.stringify({
+        error: { message: `Unknown path ${request.url}`, type: "not_found" },
+      }),
+    );
     return;
   }
 
   // STRICT=1 mimics a server that rejects unknown top-level fields.
   const KNOWN = new Set([
-    "model", "messages", "tools", "tool_choice", "stream", "stream_options",
-    "temperature", "top_p", "max_tokens", "max_completion_tokens", "stop", "n",
-    "parallel_tool_calls", "seed", "user", "response_format", "logprobs",
-    "frequency_penalty", "presence_penalty",
+    "model",
+    "messages",
+    "tools",
+    "tool_choice",
+    "stream",
+    "stream_options",
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "max_completion_tokens",
+    "stop",
+    "n",
+    "parallel_tool_calls",
+    "seed",
+    "user",
+    "response_format",
+    "logprobs",
+    "frequency_penalty",
+    "presence_penalty",
   ]);
   if (process.env.STRICT === "1") {
     const unknown = Object.keys(parsed).filter((key) => !KNOWN.has(key));
@@ -68,7 +92,10 @@ function handle(request, response, body) {
       response.writeHead(400, { "content-type": "application/json" });
       response.end(
         JSON.stringify({
-          error: { message: `Unrecognized request arguments: ${unknown.join(", ")}`, type: "invalid_request_error" },
+          error: {
+            message: `Unrecognized request arguments: ${unknown.join(", ")}`,
+            type: "invalid_request_error",
+          },
         }),
       );
       return;
@@ -78,7 +105,12 @@ function handle(request, response, body) {
   if (parsed.model === undefined || parsed.messages === undefined) {
     response.writeHead(400, { "content-type": "application/json" });
     response.end(
-      JSON.stringify({ error: { message: "'model' and 'messages' are required", type: "invalid_request_error" } }),
+      JSON.stringify({
+        error: {
+          message: "'model' and 'messages' are required",
+          type: "invalid_request_error",
+        },
+      }),
     );
     return;
   }
@@ -144,5 +176,9 @@ function handle(request, response, body) {
 createServer((request, response) => {
   const chunks = [];
   request.on("data", (part) => chunks.push(part));
-  request.on("end", () => handle(request, response, Buffer.concat(chunks).toString("utf8")));
-}).listen(PORT, "127.0.0.1", () => console.error(`[chat] listening on ${PORT}`));
+  request.on("end", () =>
+    handle(request, response, Buffer.concat(chunks).toString("utf8")),
+  );
+}).listen(PORT, "127.0.0.1", () =>
+  console.error(`[chat] listening on ${PORT}`),
+);

@@ -28,7 +28,9 @@
 const PROBE_TIMEOUT_MS = 10_000;
 
 export function normalizeBaseUrl(baseUrl) {
-  const trimmed = String(baseUrl ?? "").trim().replace(/\/+$/, "");
+  const trimmed = String(baseUrl ?? "")
+    .trim()
+    .replace(/\/+$/, "");
   if (trimmed === "") throw new Error("A base URL is required.");
   const parsed = URL.parse(trimmed);
   if (parsed === null) throw new Error(`Not a valid base URL: ${baseUrl}`);
@@ -43,7 +45,10 @@ async function request(url, { apiKey, method = "POST", body, signal }) {
   if (body !== undefined) headers["content-type"] = "application/json";
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
   const response = await fetch(url, { method, headers, body, signal });
-  return { status: response.status, text: (await response.text()).slice(0, 2000) };
+  return {
+    status: response.status,
+    text: (await response.text()).slice(0, 2000),
+  };
 }
 
 /** An empty body separates "route missing" from "route present but unhappy". */
@@ -76,7 +81,8 @@ async function probe(baseUrl, path, apiKey) {
     path,
     implemented: status < 500,
     status,
-    detail: status < 500 ? "route served" : `server error: ${text.slice(0, 200)}`,
+    detail:
+      status < 500 ? "route served" : `server error: ${text.slice(0, 200)}`,
   };
 }
 
@@ -90,7 +96,9 @@ async function listModels(baseUrl, apiKey) {
     if (status !== 200) return [];
     const parsed = JSON.parse(text);
     const data = Array.isArray(parsed?.data) ? parsed.data : [];
-    return data.map((entry) => entry?.id).filter((id) => typeof id === "string");
+    return data
+      .map((entry) => entry?.id)
+      .filter((id) => typeof id === "string");
   } catch {
     return [];
   }

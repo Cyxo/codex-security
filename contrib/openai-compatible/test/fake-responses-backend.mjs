@@ -12,13 +12,18 @@ function handle(request, response, body) {
   if (request.url.startsWith("/v1/models")) {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
-      JSON.stringify({ object: "list", data: [{ id: "fake-responses-model", object: "model" }] }),
+      JSON.stringify({
+        object: "list",
+        data: [{ id: "fake-responses-model", object: "model" }],
+      }),
     );
     return;
   }
   if (!request.url.startsWith("/v1/responses")) {
     response.writeHead(404, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: { message: `Unknown path ${request.url}` } }));
+    response.end(
+      JSON.stringify({ error: { message: `Unknown path ${request.url}` } }),
+    );
     return;
   }
 
@@ -31,7 +36,12 @@ function handle(request, response, body) {
   if (parsed.model === undefined || parsed.input === undefined) {
     response.writeHead(400, { "content-type": "application/json" });
     response.end(
-      JSON.stringify({ error: { message: "'model' and 'input' are required", type: "invalid_request_error" } }),
+      JSON.stringify({
+        error: {
+          message: "'model' and 'input' are required",
+          type: "invalid_request_error",
+        },
+      }),
     );
     return;
   }
@@ -41,7 +51,13 @@ function handle(request, response, body) {
     id: "msg_fake",
     status: "completed",
     role: "assistant",
-    content: [{ type: "output_text", text: "hello from the fake responses backend", annotations: [] }],
+    content: [
+      {
+        type: "output_text",
+        text: "hello from the fake responses backend",
+        annotations: [],
+      },
+    ],
   };
   const completed = {
     id: "resp_fake",
@@ -62,12 +78,28 @@ function handle(request, response, body) {
     "cache-control": "no-cache",
     connection: "keep-alive",
   });
-  response.write(event("response.created", { response: { id: "resp_fake", status: "in_progress" } }));
-  response.write(event("response.output_item.added", { output_index: 0, item: { ...message, content: [] } }));
   response.write(
-    event("response.output_text.delta", { item_id: "msg_fake", output_index: 0, content_index: 0, delta: "hello" }),
+    event("response.created", {
+      response: { id: "resp_fake", status: "in_progress" },
+    }),
   );
-  response.write(event("response.output_item.done", { output_index: 0, item: message }));
+  response.write(
+    event("response.output_item.added", {
+      output_index: 0,
+      item: { ...message, content: [] },
+    }),
+  );
+  response.write(
+    event("response.output_text.delta", {
+      item_id: "msg_fake",
+      output_index: 0,
+      content_index: 0,
+      delta: "hello",
+    }),
+  );
+  response.write(
+    event("response.output_item.done", { output_index: 0, item: message }),
+  );
   response.write(event("response.completed", { response: completed }));
   response.end();
 }
@@ -75,5 +107,9 @@ function handle(request, response, body) {
 createServer((request, response) => {
   const chunks = [];
   request.on("data", (part) => chunks.push(part));
-  request.on("end", () => handle(request, response, Buffer.concat(chunks).toString("utf8")));
-}).listen(PORT, "127.0.0.1", () => console.error(`[responses] listening on ${PORT}`));
+  request.on("end", () =>
+    handle(request, response, Buffer.concat(chunks).toString("utf8")),
+  );
+}).listen(PORT, "127.0.0.1", () =>
+  console.error(`[responses] listening on ${PORT}`),
+);

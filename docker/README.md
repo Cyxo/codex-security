@@ -147,6 +147,43 @@ Run `docker compose -f compose.runner.yaml run --rm codex-security --help` to
 see which commands your image supports. Your CI system controls stage order
 and retries.
 
+### OpenAI-compatible inference endpoints
+
+Setting `CS_COMPAT_BASE_URL` makes the entrypoint run the wrapper in
+`/opt/codex-security-contrib/openai-compatible`, which probes the endpoint and
+appends its provider definition to the command. Unset, the entrypoint behaves
+as before.
+
+An endpoint serving only `/chat/completions` needs the LiteLLM sidecar in
+`compose.openai-compatible.yaml`, because the bundled Codex removed
+`wire_api = "chat"`. Add that file after the base one. The
+[wrapper guide](../contrib/openai-compatible/README.md) covers both endpoint
+kinds, the probe, and the limits.
+
+### X11 pass-through
+
+`compose.yaml` and `compose.runner.yaml` bind the host's `/tmp/.X11-unix` into
+the container read-only and pass `DISPLAY` through, so a program in the
+container can reach a local X server. Read-only is enough: a read-only mount
+denies writes to regular files, directories, and symlinks, not to sockets.
+
+Two consequences. The bind needs `/tmp/.X11-unix` to exist, so a headless host
+must point `CODEX_SECURITY_X11_SOCKET` at a directory that does:
+
+```bash
+CODEX_SECURITY_X11_SOCKET=/tmp docker compose -f compose.runner.yaml run --rm codex-security --help
+```
+
+And the X server rejects the container's uid 10001 until the display grants it,
+for example with `xhost +SI:localuser:#10001`, or `xhost +local:` for every
+local client. Both widen access to the whole X session, including input and
+window contents of unrelated programs, for a container that otherwise runs with
+dropped capabilities and a seccomp profile.
+
+An SSH-forwarded `DISPLAY` such as `localhost:10.0` reaches the host over TCP
+and ignores the socket. The image ships no X11 client libraries or GUI
+programs; add them to a derived image before the display is of any use.
+
 ### Sandbox and lifecycle
 
 The runner starts with a nonroot user, dropped capabilities,

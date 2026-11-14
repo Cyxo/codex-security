@@ -79,7 +79,9 @@ async function waitForHealth(baseUrl, child, deadline) {
   let lastError = "no response";
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`The bridge exited with status ${child.exitCode} before becoming ready.`);
+      throw new Error(
+        `The bridge exited with status ${child.exitCode} before becoming ready.`,
+      );
     }
     try {
       const response = await fetch(`${baseUrl}/health/liveliness`, {
@@ -92,7 +94,9 @@ async function waitForHealth(baseUrl, child, deadline) {
     }
     await new Promise((resolve) => setTimeout(resolve, HEALTH_INTERVAL_MS));
   }
-  throw new Error(`The bridge did not become ready within ${STARTUP_TIMEOUT_MS / 1000}s (${lastError}).`);
+  throw new Error(
+    `The bridge did not become ready within ${STARTUP_TIMEOUT_MS / 1000}s (${lastError}).`,
+  );
 }
 
 async function startLitellm({ targetBaseUrl, apiKey, port, log = () => {} }) {
@@ -106,7 +110,16 @@ async function startLitellm({ targetBaseUrl, apiKey, port, log = () => {} }) {
   log(`starting ${executable} on 127.0.0.1:${chosenPort} -> ${targetBaseUrl}`);
   const child = spawn(
     executable,
-    ["--config", configPath, "--host", "127.0.0.1", "--port", String(chosenPort), "--num_workers", "1"],
+    [
+      "--config",
+      configPath,
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(chosenPort),
+      "--num_workers",
+      "1",
+    ],
     {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
@@ -156,7 +169,9 @@ async function startLitellm({ targetBaseUrl, apiKey, port, log = () => {} }) {
   } catch (error) {
     await stop();
     const tail = output.join("").trim().split("\n").slice(-15).join("\n");
-    throw new Error(`${error.message}${tail ? `\n--- bridge output ---\n${tail}` : ""}`);
+    throw new Error(
+      `${error.message}${tail ? `\n--- bridge output ---\n${tail}` : ""}`,
+    );
   }
 
   return { baseUrl: `${baseUrl}/v1`, apiKey: masterKey, stop };

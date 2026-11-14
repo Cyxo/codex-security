@@ -17,10 +17,24 @@ services:
       GH_TOKEN:
       GITHUB_TOKEN:
       OPENAI_API_KEY:
+      # X11 pass-through. The socket below serves a local display such as `:0`;
+      # an SSH-forwarded `localhost:10.0` reaches the host over TCP instead and
+      # ignores it.
+      DISPLAY:
     volumes:
       - type: bind
         source: ${CODEX_SECURITY_CSV:-./repositories.csv}
         target: /input/repositories.csv
+        read_only: true
+        bind:
+          create_host_path: false
+      # Read-only still permits connect(): a read-only mount denies writes to
+      # regular files, directories, and symlinks, not to sockets. Point
+      # CODEX_SECURITY_X11_SOCKET elsewhere on a host without an X server,
+      # which has no /tmp/.X11-unix to bind.
+      - type: bind
+        source: ${CODEX_SECURITY_X11_SOCKET:-/tmp/.X11-unix}
+        target: /tmp/.X11-unix
         read_only: true
         bind:
           create_host_path: false
