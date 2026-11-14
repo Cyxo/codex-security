@@ -1,0 +1,16 @@
+{
+  "name": "cs-compat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Run codex-security against any OpenAI-compatible API, bridging Chat Completions endpoints to the Responses protocol Codex requires.",
+  "type": "module",
+  "engines": {
+    "node": "^22.13.0 || ^24.0.0 || ^26.0.0"
+  },
+  "bin": {
+    "cs-compat": "./bin/cs-compat.mjs"
+  },
+  "scripts": {
+    "test": "node test/run-tests.mjs"
+  }
+}
