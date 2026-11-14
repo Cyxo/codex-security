@@ -1,0 +1,67 @@
+# Adds a Lightpanda browser so a scan can assess a running web application.
+#
+# Add this file after the base one. The scanner reaches the browser at
+# http://lightpanda:9222 and drives it with contrib/web-probe.
+#
+#   docker compose -f compose.runner.yaml -f compose.lightpanda.yaml \
+#     run --rm codex-security \
+#     scan /input/workspace \
+#     --scan-prompt-file /input/context/web-assessment.md \
+#     --output-dir /output/review --headless
+#
+# Copy contrib/web-probe/prompts/web-assessment.md into the input directory and
+# replace its scope list with the origins you are authorized to test. Test only
+# applications you are authorized to test.
+#
+# The browser reaches the target, not the scanner, so point WEB_PROBE_TARGETS
+# at something this service can resolve: another Compose service by name,
+# host.docker.internal for the host, or a public origin.
+
+services:
+  lightpanda:
+    # Pinned: the `nightly` and `latest` tags move. Verified against 1.0.4.
+    image: ${CODEX_SECURITY_LIGHTPANDA_IMAGE:-lightpanda/browser:1.0.4}
+    init: true
+    restart: "no"
+    command:
+      - serve
+      # 0.0.0.0 so the scanner container can connect. The port is not
+      # published to the host, so it stays on the Compose network.
+      - --host
+      - 0.0.0.0
+      - --port
+      - "9222"
+      # Accepted as a Host header alongside IP literals and localhost.
+      - --advertise-host
+      - lightpanda
+      # Without this, a WebSocket upgrade carrying any Origin is rejected.
+      # web-probe sends none, so it is only needed for browser-based clients.
+      - --remote-allow-origins
+      - ${CODEX_SECURITY_LIGHTPANDA_ORIGINS:-http://lightpanda:9222}
+      # Refuse to follow the application into the Compose network or cloud
+      # metadata. Drop this when the target is itself a private address, and
+      # exempt only that range.
+      - --block-private-networks
+      - --log-level
+      - ${CODEX_SECURITY_LIGHTPANDA_LOG_LEVEL:-warn}
+    environment:
+      LIGHTPANDA_DISABLE_TELEMETRY: "true"
+    # Lets the browser reach an application bound to the host's loopback.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # No healthcheck: a reliable probe would have to assume this image's
+    # contents. web-probe retries /json/version instead, for --cdp-ready-ms.
+
+  codex-security:
+    environment:
+      # Read by contrib/web-probe.
+      WEB_PROBE_CDP: http://lightpanda:9222
+      # Comma-separated host allowlist. web-probe refuses every other target.
+      WEB_PROBE_ALLOWED_HOSTS: ${WEB_PROBE_TARGETS:?set it to the authorized target hosts, comma separated}
+    depends_on:
+      lightpanda:
+        condition: service_started

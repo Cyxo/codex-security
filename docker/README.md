@@ -195,6 +195,38 @@ An endpoint serving only `/chat/completions` needs the LiteLLM sidecar in
 [wrapper guide](../contrib/openai-compatible/README.md) covers both endpoint
 kinds, the probe, and the limits.
 
+### Assessing a running web application
+
+`compose.lightpanda.yaml` adds a [Lightpanda](https://lightpanda.io) browser on
+the Compose network, and the image carries `web-probe` to drive it over CDP.
+Together they let a scan check how the deployed application behaves: response
+headers, cookie flags, the requests the client actually makes, what a form
+submits, and whether a parameter reaches the DOM unencoded.
+
+```bash
+mkdir -p input/context
+cp contrib/web-probe/prompts/web-assessment.md input/context/
+# Replace the scope list in that copy with the origins you may test.
+
+export WEB_PROBE_TARGETS=app.internal:3000
+docker compose -f compose.runner.yaml -f compose.lightpanda.yaml \
+  run --rm codex-security \
+  scan /input/workspace \
+  --scan-prompt-file /input/context/web-assessment.md \
+  --output-dir /output/review --headless
+```
+
+`WEB_PROBE_TARGETS` is required and becomes the probe's host allowlist, so the
+agent cannot navigate off the targets you named. The browser reaches the
+application, not the scanner, so name a Compose service, use
+`host.docker.internal` for the host, or give a public origin. The sidecar runs
+with `--block-private-networks`; drop that flag when the target is itself a
+private address, and exempt only its range with `--block-cidrs`.
+
+Test only applications you are authorized to test. The
+[probe guide](../contrib/web-probe/README.md) covers every action, what the
+indicators mean, and which CDP methods Lightpanda implements.
+
 ### X11 pass-through
 
 `compose.yaml` and `compose.runner.yaml` bind the host's `/tmp/.X11-unix` into

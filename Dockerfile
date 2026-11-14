@@ -42,6 +42,12 @@ COPY --chmod=0555 contrib/openai-compatible/src/ /opt/codex-security-contrib/ope
 
 ENV CS_COMPAT_WRAPPER=/opt/codex-security-contrib/openai-compatible/bin/cs-compat.mjs
 
+# Drives a Lightpanda browser over CDP, for scans that assess a running web
+# application. Node only; the browser is a separate service.
+COPY --chmod=0555 contrib/web-probe/bin/ /opt/codex-security-contrib/web-probe/bin/
+COPY --chmod=0555 contrib/web-probe/src/ /opt/codex-security-contrib/web-probe/src/
+RUN ln -s /opt/codex-security-contrib/web-probe/bin/web-probe.mjs /usr/local/bin/web-probe
+
 RUN groupadd --gid 10001 codex-security \
     && useradd --uid 10001 --gid 10001 --no-create-home codex-security \
     && mkdir -p /input /output /state \
