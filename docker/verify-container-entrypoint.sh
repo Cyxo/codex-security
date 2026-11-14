@@ -10,6 +10,26 @@ set -- bulk-scan /input/repositories.csv --output-dir /output
 PATH="$command_directory:$PATH" /usr/local/bin/codex-security-entrypoint "$@" > "$command_directory/actual"
 printf '%s\0' "$@" | cmp - "$command_directory/actual"
 
+# CODEX_SECURITY_ARGS appends, splitting on whitespace.
+CODEX_SECURITY_ARGS='--knowledge-base /input/context --headless' \
+    PATH="$command_directory:$PATH" \
+    /usr/local/bin/codex-security-entrypoint "$@" > "$command_directory/actual"
+printf '%s\0' "$@" --knowledge-base /input/context --headless |
+    cmp - "$command_directory/actual"
+
+# An empty value changes nothing.
+CODEX_SECURITY_ARGS= PATH="$command_directory:$PATH" \
+    /usr/local/bin/codex-security-entrypoint "$@" > "$command_directory/actual"
+printf '%s\0' "$@" | cmp - "$command_directory/actual"
+
+# The appended arguments reach bulk-scan's own validation, so they can carry
+# the repository CSV that this image requires.
+CODEX_SECURITY_ARGS=/input/repositories.csv PATH="$command_directory:$PATH" \
+    /usr/local/bin/codex-security-entrypoint bulk-scan --output-dir /output \
+    > "$command_directory/actual"
+printf '%s\0' bulk-scan --output-dir /output /input/repositories.csv |
+    cmp - "$command_directory/actual"
+
 # An empty CS_COMPAT_BASE_URL leaves the command untouched.
 CS_COMPAT_BASE_URL= PATH="$command_directory:$PATH" \
     /usr/local/bin/codex-security-entrypoint "$@" > "$command_directory/actual"

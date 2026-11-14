@@ -147,6 +147,41 @@ Run `docker compose -f compose.runner.yaml run --rm codex-security --help` to
 see which commands your image supports. Your CI system controls stage order
 and retries.
 
+### Input directory and extra arguments
+
+Both Compose files bind a host directory to `/input` (default `./input`,
+selected by `CODEX_SECURITY_INPUT`) for scan targets, knowledge-base files, and
+prompt files. It is read-only, because a scan reads its target. A checkout the
+model must build or test belongs under `/output`, as described above.
+
+`scan` accepts a plain directory; it does not need to be a Git repository. That
+makes a prompt-directed review of a whole input folder one command:
+
+```bash
+mkdir -p input/workspace input/context
+docker compose -f compose.runner.yaml run --rm codex-security \
+  scan /input/workspace \
+  --scan-prompt-file /input/context/instructions.md \
+  --knowledge-base /input/context \
+  --output-dir /output/review --headless
+```
+
+Arguments after `run --rm codex-security` replace the file's `command` and are
+taken verbatim, so prefer that form. When the command is fixed, as under
+`docker compose up` or for the bulk scan in `compose.yaml`, set
+`CODEX_SECURITY_ARGS` instead and the entrypoint appends it:
+
+```bash
+CODEX_SECURITY_ARGS='--knowledge-base /input/context --headless' \
+  docker compose up
+```
+
+The entrypoint splits that variable on whitespace, because Compose cannot
+expand one variable into several arguments. Quoting is not supported, so an
+argument containing a space needs the `run` form. Appended arguments reach
+bulk-scan's own validation, so the variable can carry the repository CSV this
+image requires.
+
 ### OpenAI-compatible inference endpoints
 
 Setting `CS_COMPAT_BASE_URL` makes the entrypoint run the wrapper in

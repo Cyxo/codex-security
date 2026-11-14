@@ -2,6 +2,15 @@
 
 set -eu
 
+# Compose cannot expand one variable into several arguments, so extra flags
+# arrive in one variable and are appended before any validation below. The
+# unquoted expansion is the point: it splits on whitespace. Arguments
+# containing spaces need `run --rm codex-security ARGS`, which bypasses this.
+if [ -n "${CODEX_SECURITY_ARGS:-}" ]; then
+    # shellcheck disable=SC2086
+    set -- "$@" $CODEX_SECURITY_ARGS
+fi
+
 bulk_scan_command=
 bulk_scan_input=
 bulk_scan_metadata=

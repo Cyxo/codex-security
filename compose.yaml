@@ -17,11 +17,28 @@ services:
       GH_TOKEN:
       GITHUB_TOKEN:
       OPENAI_API_KEY:
+      # Extra CLI arguments appended to `command`, for `up` and for the
+      # bulk-scan command below. Compose cannot expand one variable into
+      # several arguments, so the entrypoint splits this on whitespace. Quoting
+      # is not supported; `run --rm codex-security ARGS` takes arguments
+      # verbatim.
+      CODEX_SECURITY_ARGS:
       # X11 pass-through. The socket below serves a local display such as `:0`;
       # an SSH-forwarded `localhost:10.0` reaches the host over TCP instead and
       # ignores it.
       DISPLAY:
     volumes:
+      # Knowledge-base files, prompt files, and scan targets. Read-only: a scan
+      # reads its target. Put a checkout the model must build or test under
+      # /output instead. The CSV below mounts over this directory, so a
+      # repositories.csv inside it is ignored unless CODEX_SECURITY_CSV selects
+      # that same file.
+      - type: bind
+        source: ${CODEX_SECURITY_INPUT:-./input}
+        target: /input
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: ${CODEX_SECURITY_CSV:-./repositories.csv}
         target: /input/repositories.csv
